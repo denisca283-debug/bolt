@@ -8,8 +8,10 @@ import { useAuthModal } from './AuthModal';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { path, navigate } = useRouter();
-  const { profile, user, isAuthenticated, signOut } = useAuth();
+  const { profile, user, isAuthenticated, hasBeenAuthenticated, signOut } = useAuth();
   const { openLogin, openRegister } = useAuthModal();
+  // See TopBar: avoid flashing guest UI during a transient session gap.
+  const showAuthedUI = isAuthenticated || hasBeenAuthenticated;
 
   const go = (to: string) => {
     navigate(to);
@@ -51,7 +53,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           const active = isActive(item.path);
           const Icon = item.icon;
           // Show private items only when authenticated
-          if (item.requiresAuth && !isAuthenticated) return null;
+          if (item.requiresAuth && !showAuthedUI) return null;
           return (
             <button
               key={item.path}
@@ -69,7 +71,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
 
-        {isAuthenticated && (
+        {showAuthedUI && (
           <div className="pt-4 pb-2">
             <p className="px-3.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-txt-muted">
               Личное
@@ -88,7 +90,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Bottom section */}
       <div className="border-t border-line-soft p-3 space-y-0.5">
-        {isAuthenticated ? (
+        {showAuthedUI ? (
           <>
             <button
               onClick={() => go('/settings')}
