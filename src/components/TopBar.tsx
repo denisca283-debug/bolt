@@ -10,8 +10,12 @@ type TopBarProps = {
 
 export function TopBar({ onMenuClick }: TopBarProps) {
   const { navigate } = useRouter();
-  const { profile, user, isAuthenticated } = useAuth();
+  const { profile, user, isAuthenticated, hasBeenAuthenticated } = useAuth();
   const { openLogin, openRegister } = useAuthModal();
+  // Keep showing the authenticated chrome during a transient session gap
+  // (e.g. a background token-refresh hiccup) instead of flashing guest UI
+  // while the rest of the page still treats the user as logged in.
+  const showAuthedUI = isAuthenticated || hasBeenAuthenticated;
 
   const displayName = profile?.full_name || user?.email || 'Гость';
   const initials = displayName
@@ -40,7 +44,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
       <div className="flex-1" />
 
-      {isAuthenticated ? (
+      {showAuthedUI ? (
         <>
           {/* Quick action */}
           <button
