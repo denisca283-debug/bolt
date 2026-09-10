@@ -11,6 +11,12 @@ type AuthContextValue = {
   profileLoading: boolean;
   supabaseReady: boolean;
   isAuthenticated: boolean;
+  // True once the user has successfully authenticated at least once in this
+  // tab and hasn't explicitly signed out since. Used to avoid flashing a
+  // "logged out" UI (nav, guards) during a transient/unexpected session gap
+  // (e.g. a background token-refresh hiccup), while still resetting cleanly
+  // on a real, user-initiated sign-out.
+  hasBeenAuthenticated: boolean;
   signUp: (fullName: string, email: string, password: string) => Promise<{ error: string | null; needsEmailConfirm: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
@@ -34,6 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const profileEnsureRef = useRef<string | null>(null);
+  const wasAuthenticatedRef = useRef(false);
+  const explicitSignOutRef = useRef(false);
 
   // ── 1. Initial session (synchronous auth only — no profile queries) ──
   useEffect(() => {
@@ -54,6 +62,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
+        if (explicitSignOutRef.current) {
+          // The user actually clicked "Выйти" — fully reset the grace flag so
+          // nav/guards immediately treat this tab as a fresh guest.
+          wasAuthenticatedRef.current = false;
+          explicitSignOutRef.current = false;
+        }
+        // Otherwise this SIGNED_OUT came from Supabase itself (e.g. a failed
+        // background token refresh) — keep wasAuthenticatedRef true so the UI
+        // doesn't flicker into a half-guest state for what may be transient.
       } else if (newSession) {
         setSession(newSession);
         setUser(newSession.user);
@@ -158,8 +175,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    explicitSignOutRef.current = true;
     await supabase.auth.signOut();
-    // onAuthStateChange will clear user/session.
+    // onAuthStateChange will clear user/session (and the grace flag, since
+    // explicitSignOutRef is set).
     // Clear profile synchronously so UI updates immediately.
     setProfile(null);
     profileEnsureRef.current = null;
@@ -181,6 +200,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isAuthenticated = !!user && !!session;
+  if (isAuthenticated) {
+    wasAuthenticatedRef.current = true;
+  }
 
   return (
     <AuthContext.Provider
@@ -189,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authLoading, profileLoading,
         supabaseReady: isSupabaseConfigured,
         isAuthenticated,
+        hasBeenAuthenticated: wasAuthenticatedRef.current,
         signUp, signIn, signOut,
         resetPassword, updatePassword,
         refreshProfile,
