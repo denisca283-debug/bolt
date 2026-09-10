@@ -6,8 +6,9 @@ import {
 import { Card, Badge, ShareButton, Avatar } from '../components/ui';
 import { Logo } from '../components/Logo';
 import { useAuth } from '../hooks/useAuth';
+import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
-import type { Department, Profession } from '../types';
+import type { Department, Profession, Profile } from '../types';
 
 type PrimaryProfession = {
   user_profession_id: string;
@@ -17,8 +18,51 @@ type PrimaryProfession = {
   department_name: string;
 };
 
-export function ProfilePage() {
-  const { user, profile, refreshProfile } = useAuth();
+type UserProfessionRow = {
+  id: string;
+  profession_id: string;
+  is_primary: boolean;
+  profession: {
+    id: string;
+    name: string;
+    department_id: string;
+    department: { id: string; name: string } | null;
+  } | null;
+};
+
+function extractPrimaryProfession(rows: UserProfessionRow[]): PrimaryProfession | null {
+  const primary = rows.find((r) => r.is_primary && r.profession);
+  if (!primary?.profession) return null;
+  return {
+    user_profession_id: primary.id,
+    profession_id: primary.profession.id,
+    profession_name: primary.profession.name,
+    department_id: primary.profession.department_id,
+    department_name: primary.profession.department?.name || '',
+  };
+}
+
+const USER_PROFESSIONS_SELECT = `
+  id,
+  profession_id,
+  is_primary,
+  profession:professions(
+    id,
+    name,
+    department_id,
+    department:departments(id, name)
+  )
+`;
+
+// `slug` is set when viewing a public profile at /u/:slug. When absent, this
+// renders the current user's own profile (route: /profile), with editing.
+export function ProfilePage({ slug }: { slug?: string } = {}) {
+  const isOwnProfile = !slug;
+  const { user, profile: ownProfile, refreshProfile } = useAuth();
+  const { navigate } = useRouter();
+
+  const [targetProfile, setTargetProfile] = useState<Profile | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -27,7 +71,7 @@ export function ProfilePage() {
   const [allProfessions, setAllProfessions] = useState<Profession[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Edit form state
+  // Edit form state (owner only)
   const [editName, setEditName] = useState('');
   const [editCity, setEditCity] = useState('');
   const [editAbout, setEditAbout] = useState('');
@@ -36,72 +80,83 @@ export function ProfilePage() {
   const [editDeptId, setEditDeptId] = useState<string>('');
   const [editProfId, setEditProfId] = useState<string>('');
 
+  const displayProfile = isOwnProfile ? ownProfile : targetProfile;
+
   const loadData = useCallback(async () => {
-    if (!user) return;
-    const [deptRes, profRes, userProfRes] = await Promise.all([
-      supabase.from('departments').select('*').order('sort_order'),
-      supabase.from('professions').select('*').order('sort_order'),
-      supabase
-        .from('user_professions')
-        .select(`
-          id,
-          profession_id,
-          is_primary,
-          profession:professions(
-            id,
-            name,
-            department_id,
-            department:departments(id, name)
-          )
-        `)
-        .eq('user_id', user.id),
-    ]);
+    setLoading(true);
+    setSaveMsg(null);
 
-    if (deptRes.data) setDepartments(deptRes.data as Department[]);
-    if (profRes.data) setAllProfessions(profRes.data as Profession[]);
-
-    if (userProfRes.data) {
-      const rows = userProfRes.data as unknown as Array<{
-        id: string;
-        profession_id: string;
-        is_primary: boolean;
-        profession: {
-          id: string;
-          name: string;
-          department_id: string;
-          department: { id: string; name: string } | null;
-        } | null;
-      }>;
-      const primary = rows.find((r) => r.is_primary && r.profession);
-      if (primary?.profession) {
-        setPrimaryProf({
-          user_profession_id: primary.id,
-          profession_id: primary.profession.id,
-          profession_name: primary.profession.name,
-          department_id: primary.profession.department_id,
-          department_name: primary.profession.department?.name || '',
-        });
+    if (!slug) {
+      // Own profile — driven by the logged-in user's id.
+      if (!user) {
+        setLoading(false);
+        return;
       }
+      setNotFound(false);
+
+      const [deptRes, profRes, userProfRes] = await Promise.all([
+        supabase.from('departments').select('*').order('sort_order'),
+        supabase.from('professions').select('*').order('sort_order'),
+        supabase.from('user_professions').select(USER_PROFESSIONS_SELECT).eq('user_id', user.id),
+      ]);
+
+      if (deptRes.data) setDepartments(deptRes.data as Department[]);
+      if (profRes.data) setAllProfessions(profRes.data as Profession[]);
+      setPrimaryProf(
+        userProfRes.data ? extractPrimaryProfession(userProfRes.data as unknown as UserProfessionRow[]) : null
+      );
+
+      setLoading(false);
+      return;
     }
+
+    // Public profile lookup by slug — must work for guests too.
+    const { data: profileRow, error: profileErr } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('public_slug', slug)
+      .maybeSingle();
+
+    if (profileErr || !profileRow) {
+      setNotFound(true);
+      setTargetProfile(null);
+      setPrimaryProf(null);
+      setLoading(false);
+      return;
+    }
+
+    setNotFound(false);
+    setTargetProfile(profileRow as Profile);
+
+    const { data: userProfData } = await supabase
+      .from('user_professions')
+      .select(USER_PROFESSIONS_SELECT)
+      .eq('user_id', profileRow.id);
+
+    setPrimaryProf(
+      userProfData ? extractPrimaryProfession(userProfData as unknown as UserProfessionRow[]) : null
+    );
+
     setLoading(false);
-  }, [user]);
+  }, [slug, user]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   useEffect(() => {
-    if (profile) {
-      setEditName(profile.full_name || '');
-      setEditCity(profile.city || '');
-      setEditAbout(profile.about || '');
-      setEditAvailability(profile.availability_status || 'available');
-      setEditAvatarUrl(profile.avatar_url || null);
+    if (isOwnProfile && ownProfile) {
+      setEditName(ownProfile.full_name || '');
+      setEditCity(ownProfile.city || '');
+      setEditAbout(ownProfile.about || '');
+      setEditAvailability(ownProfile.availability_status || 'available');
+      setEditAvatarUrl(ownProfile.avatar_url || null);
     }
-  }, [profile]);
+  }, [isOwnProfile, ownProfile]);
 
   // Sync edit form with loaded primary profession
   useEffect(() => {
+    if (!isOwnProfile) return;
     if (primaryProf) {
       setEditDeptId(primaryProf.department_id);
       setEditProfId(primaryProf.profession_id);
@@ -109,7 +164,7 @@ export function ProfilePage() {
       setEditDeptId('');
       setEditProfId('');
     }
-  }, [primaryProf]);
+  }, [isOwnProfile, primaryProf]);
 
   const filteredProfessions = editDeptId
     ? allProfessions.filter((p) => p.department_id === editDeptId)
@@ -225,7 +280,18 @@ export function ProfilePage() {
     );
   }
 
-  const displayName = profile?.full_name || user?.email || 'Гость';
+  if (notFound) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-txt-secondary text-lg">Профиль не найден</p>
+        <button onClick={() => navigate('/')} className="mt-4 btn-secondary">
+          На главную
+        </button>
+      </div>
+    );
+  }
+
+  const displayName = displayProfile?.full_name || (isOwnProfile ? user?.email : null) || 'Пользователь FilmVerse';
   const initials = displayName.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const availabilityLabels: Record<string, string> = {
     available: 'Свободен',
@@ -240,13 +306,13 @@ export function ProfilePage() {
 
   // Missing profile basics (owner-only)
   const missing: string[] = [];
-  if (!profile?.avatar_url) missing.push('фото');
-  if (!profile?.city) missing.push('город');
+  if (!displayProfile?.avatar_url) missing.push('фото');
+  if (!displayProfile?.city) missing.push('город');
   if (!primaryProf) missing.push('основная профессия');
-  if (!profile?.about) missing.push('о себе');
+  if (!displayProfile?.about) missing.push('о себе');
   const profileIncomplete = missing.length > 0;
 
-  if (editing) {
+  if (isOwnProfile && editing) {
     return (
       <div className="animate-fade-in max-w-2xl">
         <div className="flex items-center justify-between mb-6">
@@ -387,15 +453,17 @@ export function ProfilePage() {
         </div>
         <div className="px-6 pb-6">
           <div className="flex items-end justify-between -mt-12">
-            {profile?.avatar_url ? (
-              <img src={profile.avatar_url} alt="" className="h-20 w-20 rounded-full object-cover ring-4 ring-surface-600" />
+            {displayProfile?.avatar_url ? (
+              <img src={displayProfile.avatar_url} alt="" className="h-20 w-20 rounded-full object-cover ring-4 ring-surface-600" />
             ) : (
               <Avatar initials={initials} size="lg" className="ring-4 ring-surface-600 !h-20 !w-20 !text-2xl" />
             )}
             <div className="flex gap-2 mb-2">
-              <button onClick={() => setEditing(true)} className="btn-secondary">
-                <Edit3 className="h-4 w-4" /> Редактировать
-              </button>
+              {isOwnProfile && (
+                <button onClick={() => setEditing(true)} className="btn-secondary">
+                  <Edit3 className="h-4 w-4" /> Редактировать
+                </button>
+              )}
               <ShareButton />
             </div>
           </div>
@@ -407,20 +475,20 @@ export function ProfilePage() {
             <p className="mt-1 text-sm text-emerald-600 font-medium">{primaryProf.profession_name}</p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-txt-secondary">
-            <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" />{profile?.city || 'Город не указан'}</span>
-            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" />На FilmVerse с {new Date(profile?.created_at || Date.now()).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</span>
-            {user?.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{user.email}</span>}
+            <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5" />{displayProfile?.city || 'Город не указан'}</span>
+            <span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" />На FilmVerse с {new Date(displayProfile?.created_at || Date.now()).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</span>
+            {isOwnProfile && user?.email && <span className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" />{user.email}</span>}
           </div>
           <div className="mt-3">
-            <span className={`chip ${availabilityColors[profile?.availability_status || 'available']}`}>
-              {availabilityLabels[profile?.availability_status || 'available']}
+            <span className={`chip ${availabilityColors[displayProfile?.availability_status || 'available']}`}>
+              {availabilityLabels[displayProfile?.availability_status || 'available']}
             </span>
           </div>
         </div>
       </Card>
 
       {/* Incomplete profile prompt (owner-only) */}
-      {profileIncomplete && (
+      {isOwnProfile && profileIncomplete && (
         <Card className="p-5 mt-6 border-emerald-400/30">
           <h2 className="text-sm font-semibold text-txt-primary mb-2">Заполните профиль</h2>
           <p className="text-sm text-txt-secondary mb-3">
@@ -447,15 +515,17 @@ export function ProfilePage() {
             <Badge variant="fern">Основная</Badge>
           </div>
         ) : (
-          <p className="text-sm text-txt-muted">Добавьте основную профессию</p>
+          <p className="text-sm text-txt-muted">
+            {isOwnProfile ? 'Добавьте основную профессию' : 'Профессия не указана'}
+          </p>
         )}
       </Card>
 
       {/* About */}
-      {profile?.about && (
+      {displayProfile?.about && (
         <Card className="p-6 mt-6">
           <h2 className="text-sm font-semibold text-txt-primary mb-3">О себе</h2>
-          <p className="text-sm text-txt-secondary leading-relaxed">{profile.about}</p>
+          <p className="text-sm text-txt-secondary leading-relaxed">{displayProfile.about}</p>
         </Card>
       )}
 
