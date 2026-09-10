@@ -38,7 +38,7 @@ function PageRouter() {
   if (actorId) return <ActorProfilePage actorId={actorId} />;
 
   const publicSlug = getRouteParam(path, '/u');
-  if (publicSlug) return <ProfilePage />;
+  if (publicSlug) return <ProfilePage slug={publicSlug} />;
 
   switch (path) {
     case '/':
@@ -71,21 +71,16 @@ function PageRouter() {
 }
 
 function PrivateRouteGuard() {
-  const { isAuthenticated, authLoading } = useAuth();
+  const { isAuthenticated, authLoading, hasBeenAuthenticated } = useAuth();
   const { path, navigate } = useRouter();
   const { promptGuest } = useAuthModal();
   const handledRef = useRef<string | null>(null);
-  const wasAuthenticatedRef = useRef(false);
-
-  if (isAuthenticated) {
-    wasAuthenticatedRef.current = true;
-  }
 
   useEffect(() => {
     if (authLoading) return;
     if (isAuthenticated) return;
     // Don't redirect a previously-authenticated user on a transient session gap
-    if (wasAuthenticatedRef.current) return;
+    if (hasBeenAuthenticated) return;
     if (!PRIVATE_ROUTES.has(path)) return;
     if (handledRef.current === path) return;
 
@@ -93,7 +88,7 @@ function PrivateRouteGuard() {
     const msg = PRIVATE_ROUTE_MESSAGES[path] || 'Войдите в FilmVerse, чтобы продолжить.';
     navigate('/');
     promptGuest({ message: msg });
-  }, [authLoading, isAuthenticated, path, navigate, promptGuest]);
+  }, [authLoading, isAuthenticated, hasBeenAuthenticated, path, navigate, promptGuest]);
 
   // Reset handled ref when path changes to a non-private route
   useEffect(() => {
@@ -106,13 +101,8 @@ function PrivateRouteGuard() {
 }
 
 function AppContent() {
-  const { authLoading, isAuthenticated } = useAuth();
+  const { authLoading, isAuthenticated, hasBeenAuthenticated } = useAuth();
   const { path } = useRouter();
-  const wasAuthenticatedRef = useRef(false);
-
-  if (isAuthenticated) {
-    wasAuthenticatedRef.current = true;
-  }
 
   // Standalone auth pages (forgot/reset password) — no AppShell
   if (STANDALONE_AUTH_ROUTES.has(path)) {
@@ -133,7 +123,7 @@ function AppContent() {
   // Only show the blocking spinner for users who were NEVER authenticated in this
   // session. If a previously-authenticated user's session flickers (token refresh,
   // transient null), keep the page mounted so edit state is not destroyed.
-  if (!isAuthenticated && PRIVATE_ROUTES.has(path) && !wasAuthenticatedRef.current) {
+  if (!isAuthenticated && PRIVATE_ROUTES.has(path) && !hasBeenAuthenticated) {
     return (
       <>
         <PrivateRouteGuard />
