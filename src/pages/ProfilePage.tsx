@@ -6,6 +6,7 @@ import {
 import { Card, Badge, ShareButton, Avatar } from '../components/ui';
 import { Logo } from '../components/Logo';
 import { useAuth } from '../hooks/useAuth';
+import { useAuthModal } from '../components/AuthModal';
 import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
 import type { Department, Profession, Profile } from '../types';
@@ -60,6 +61,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   const isOwnProfile = !slug;
   const { user, profile: ownProfile, refreshProfile } = useAuth();
   const { navigate } = useRouter();
+  const { promptGuest } = useAuthModal();
 
   const [targetProfile, setTargetProfile] = useState<Profile | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -171,7 +173,11 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     : [];
 
   const handleAvatarUpload = async (file: File) => {
-    if (!user) return;
+    if (!user) {
+      setEditing(false);
+      promptGuest({ message: 'Сессия истекла. Войдите снова, чтобы изменить фото.' });
+      return;
+    }
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -194,7 +200,11 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   };
 
   const handleSave = async () => {
-    if (!user) return;
+    if (!user) {
+      setEditing(false);
+      promptGuest({ message: 'Сессия истекла. Войдите снова, чтобы сохранить изменения.' });
+      return;
+    }
     setSaving(true);
     setSaveMsg(null);
 
@@ -460,7 +470,16 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
             )}
             <div className="flex gap-2 mb-2">
               {isOwnProfile && (
-                <button onClick={() => setEditing(true)} className="btn-secondary">
+                <button
+                  onClick={() => {
+                    if (!user) {
+                      promptGuest({ message: 'Войдите снова, чтобы редактировать профиль.' });
+                      return;
+                    }
+                    setEditing(true);
+                  }}
+                  className="btn-secondary"
+                >
                   <Edit3 className="h-4 w-4" /> Редактировать
                 </button>
               )}
@@ -494,7 +513,16 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
           <p className="text-sm text-txt-secondary mb-3">
             Не хватает: {missing.join(', ')}
           </p>
-          <button onClick={() => setEditing(true)} className="btn-primary">
+          <button
+            onClick={() => {
+              if (!user) {
+                promptGuest({ message: 'Войдите снова, чтобы дополнить профиль.' });
+                return;
+              }
+              setEditing(true);
+            }}
+            className="btn-primary"
+          >
             <Edit3 className="h-4 w-4" /> Дополнить профиль
           </button>
         </Card>
@@ -537,3 +565,4 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     </div>
   );
 }
+
