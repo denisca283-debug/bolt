@@ -174,8 +174,9 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
 
   const handleAvatarUpload = async (file: File) => {
     if (!user) {
-      setEditing(false);
-      promptGuest({ message: 'Сессия истекла. Войдите снова, чтобы изменить фото.' });
+      // Keep the form open with whatever the person already typed — don't
+      // discard it — and tell them plainly why the photo can't upload yet.
+      setSaveMsg({ type: 'error', text: 'Сессия истекла. Обновите страницу и войдите снова — тогда фото загрузится.' });
       return;
     }
     setSaving(true);
@@ -201,16 +202,22 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
 
   const handleSave = async () => {
     if (!user) {
-      setEditing(false);
-      promptGuest({ message: 'Сессия истекла. Войдите снова, чтобы сохранить изменения.' });
+      // Keep the form open with the person's edits intact — don't discard
+      // what they typed — and tell them plainly why nothing was saved.
+      setSaveMsg({ type: 'error', text: 'Сессия истекла. Обновите страницу и войдите снова — тогда сохраним.' });
       return;
     }
     setSaving(true);
     setSaveMsg(null);
 
     try {
-      // 1. Save profile fields
-      const { error: profError } = await supabase
+      // 1. Save profile fields. `.select()` forces Supabase to report back
+      // which row(s) were actually touched — without it, an UPDATE that
+      // matches zero rows (e.g. no profile row yet for this account) still
+      // returns error: null, and the UI would wrongly claim success while
+      // silently saving nothing (this was the root cause of "Сохранить"
+      // appearing to work but the city/photo never actually sticking).
+      const { data: updatedRows, error: profError } = await supabase
         .from('profiles')
         .update({
           full_name: editName,
@@ -219,11 +226,30 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
           availability_status: editAvailability,
           avatar_url: editAvatarUrl,
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('id');
       if (profError) {
         setSaveMsg({ type: 'error', text: 'Не удалось сохранить профиль. Попробуйте ещё раз.' });
         setSaving(false);
         return;
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        // No profile row existed for this account yet — create it instead
+        // of pretending the (no-op) update succeeded.
+        const { error: insertErr } = await supabase.from('profiles').insert({
+          id: user.id,
+          full_name: editName,
+          city: editCity,
+          about: editAbout,
+          availability_status: editAvailability,
+          avatar_url: editAvatarUrl,
+        });
+        if (insertErr) {
+          setSaveMsg({ type: 'error', text: 'Профиль не найден в базе данных. Попробуйте выйти и войти заново.' });
+          setSaving(false);
+          return;
+        }
       }
 
       // 2. Save primary profession if selected
