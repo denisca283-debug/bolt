@@ -55,6 +55,18 @@ const USER_PROFESSIONS_SELECT = `
   )
 `;
 
+// Suggested cities for the profile form. Offered as suggestions rather than a
+// closed dropdown on purpose: shoots happen in small towns too, so anything
+// typed by hand must still be accepted.
+const CITY_SUGGESTIONS = [
+  'Москва', 'Санкт-Петербург', 'Новосибирск', 'Екатеринбург', 'Казань',
+  'Нижний Новгород', 'Челябинск', 'Самара', 'Омск', 'Ростов-на-Дону',
+  'Уфа', 'Красноярск', 'Воронеж', 'Пермь', 'Волгоград', 'Краснодар',
+  'Саратов', 'Тюмень', 'Ижевск', 'Ярославль', 'Иркутск', 'Хабаровск',
+  'Владивосток', 'Калининград', 'Сочи', 'Тула', 'Ставрополь', 'Ульяновск',
+  'Минск', 'Алматы', 'Астана', 'Ташкент', 'Тбилиси', 'Ереван', 'Баку',
+];
+
 // `slug` is set when viewing a public profile at /u/:slug. When absent, this
 // renders the current user's own profile (route: /profile), with editing.
 export function ProfilePage({ slug }: { slug?: string } = {}) {
@@ -84,13 +96,19 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
 
   const displayProfile = isOwnProfile ? ownProfile : targetProfile;
 
+  // Key the loader on the user ID (a string), never on the `user` object.
+  // Supabase hands out a new user object on every auth event (tab focus,
+  // token refresh); keying on the object made this effect re-run — and the
+  // page re-load — on each one.
+  const userId = user?.id;
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setSaveMsg(null);
 
     if (!slug) {
       // Own profile — driven by the logged-in user's id.
-      if (!user) {
+      if (!userId) {
         setLoading(false);
         return;
       }
@@ -99,7 +117,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
       const [deptRes, profRes, userProfRes] = await Promise.all([
         supabase.from('departments').select('*').order('sort_order'),
         supabase.from('professions').select('*').order('sort_order'),
-        supabase.from('user_professions').select(USER_PROFESSIONS_SELECT).eq('user_id', user.id),
+        supabase.from('user_professions').select(USER_PROFESSIONS_SELECT).eq('user_id', userId),
       ]);
 
       if (deptRes.data) setDepartments(deptRes.data as Department[]);
@@ -140,25 +158,31 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     );
 
     setLoading(false);
-  }, [slug, user]);
+  }, [slug, userId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  // Seed the edit form from the stored profile — but NEVER while the form is
+  // open. A background profile refresh used to fire this and overwrite the
+  // city/name the person was in the middle of typing, which looked exactly
+  // like "it didn't save what I entered".
   useEffect(() => {
-    if (isOwnProfile && ownProfile) {
-      setEditName(ownProfile.full_name || '');
-      setEditCity(ownProfile.city || '');
-      setEditAbout(ownProfile.about || '');
-      setEditAvailability(ownProfile.availability_status || 'available');
-      setEditAvatarUrl(ownProfile.avatar_url || null);
-    }
-  }, [isOwnProfile, ownProfile]);
+    if (!isOwnProfile || !ownProfile) return;
+    if (editing) return;
+    setEditName(ownProfile.full_name || '');
+    setEditCity(ownProfile.city || '');
+    setEditAbout(ownProfile.about || '');
+    setEditAvailability(ownProfile.availability_status || 'available');
+    setEditAvatarUrl(ownProfile.avatar_url || null);
+  }, [isOwnProfile, ownProfile, editing]);
 
-  // Sync edit form with loaded primary profession
+  // Same rule for the profession selects: don't reset them under the person's
+  // hands while they are choosing.
   useEffect(() => {
     if (!isOwnProfile) return;
+    if (editing) return;
     if (primaryProf) {
       setEditDeptId(primaryProf.department_id);
       setEditProfId(primaryProf.profession_id);
@@ -166,7 +190,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
       setEditDeptId('');
       setEditProfId('');
     }
-  }, [isOwnProfile, primaryProf]);
+  }, [isOwnProfile, primaryProf, editing]);
 
   const filteredProfessions = editDeptId
     ? allProfessions.filter((p) => p.department_id === editDeptId)
@@ -308,7 +332,10 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     setSaving(false);
   };
 
-  if (loading) {
+  // Only block the page while there is genuinely nothing to show yet.
+  // A background refresh must never blank out a profile that is already on
+  // screen — and must never rip away an open edit form mid-typing.
+  if (loading && !displayProfile && !editing) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-6 w-6 text-emerald-500 animate-spin" />
@@ -402,7 +429,23 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
           {/* City */}
           <div>
             <label className="block text-xs font-medium text-txt-secondary mb-1.5">Город</label>
-            <input type="text" value={editCity} onChange={(e) => setEditCity(e.target.value)} className="input-field" />
+            <input
+              type="text"
+              value={editCity}
+              onChange={(e) => setEditCity(e.target.value)}
+              className="input-field"
+              list="filmverse-city-suggestions"
+              placeholder="Начните вводить — появятся подсказки"
+              autoComplete="off"
+            />
+            <datalist id="filmverse-city-suggestions">
+              {CITY_SUGGESTIONS.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
+            <p className="mt-1.5 text-xs text-txt-muted">
+              Города нет в списке? Впишите свой — он сохранится.
+            </p>
           </div>
 
           {/* Department + Profession */}
@@ -592,3 +635,4 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   );
 }
 
+с
