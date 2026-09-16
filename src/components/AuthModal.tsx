@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
 import { X, Mail, Lock, User, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRouter } from '../router';
@@ -152,8 +152,15 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
     ? null
     : mode === 'login' ? 'Вход' : 'Регистрация';
 
+  // Memoised for the same reason as the router/auth contexts: a fresh object
+  // literal here re-renders every consumer on each render of this provider.
+  const modalValue = useMemo(
+    () => ({ openAuth, openLogin, openRegister, promptGuest, closeAuth }),
+    [openAuth, openLogin, openRegister, promptGuest, closeAuth]
+  );
+
   return (
-    <AuthModalContext.Provider value={{ openAuth, openLogin, openRegister, promptGuest, closeAuth }}>
+    <AuthModalContext.Provider value={modalValue}>
       {children}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fade-in">
@@ -323,3 +330,4 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
     </AuthModalContext.Provider>
   );
 }
+с
