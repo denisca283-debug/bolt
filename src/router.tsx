@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 
 type RouterContextValue = {
   path: string;
@@ -27,16 +27,18 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  const navigate = (to: string) => {
+  // `navigate` and the context value must keep a stable identity. Recreating
+  // them on every render handed a new `navigate` to every consumer, which
+  // re-ran any effect listing it as a dependency (App's private-route guard
+  // does) on every single render — a constant re-navigate/reload churn.
+  const navigate = useCallback((to: string) => {
     window.location.hash = to;
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
-  };
+  }, []);
 
-  return (
-    <RouterContext.Provider value={{ path, navigate }}>
-      {children}
-    </RouterContext.Provider>
-  );
+  const value = useMemo<RouterContextValue>(() => ({ path, navigate }), [path, navigate]);
+
+  return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }
 
 export function getRouteParam(path: string, prefix: string): string | null {
