@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { Profile } from '../types';
@@ -72,8 +72,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // background token refresh) — keep wasAuthenticatedRef true so the UI
         // doesn't flicker into a half-guest state for what may be transient.
       } else if (newSession) {
-        setSession(newSession);
-        setUser(newSession.user);
+        // Supabase re-fires SIGNED_IN / TOKEN_REFRESHED whenever the tab
+        // regains focus, on visibility changes and on every token refresh.
+        // Calling setState unconditionally handed every consumer a BRAND NEW
+        // `user`/`session` object each time — even when nothing had actually
+        // changed. Any effect keyed on those objects (e.g. ProfilePage's data
+        // loader) then re-ran on every event, which is what made pages reload
+        // over and over. Keep the previous object when it is the same user /
+        // the same token, so identity stays stable.
+        setSession((prev) =>
+          prev?.access_token === newSession.access_token &&
+          prev?.refresh_token === newSession.refresh_token
+            ? prev
+            : newSession
+        );
+        setUser((prev) => (prev?.id === newSession.user.id ? prev : newSession.user));
       }
     });
 
@@ -142,12 +155,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Refresh helper (call from UI when profile was edited) ──
+  // Keyed on the user id (a string), not the user object, so this callback
+  // keeps a stable identity across auth events that don't change who is
+  // logged in — otherwise every consumer holding it re-renders for nothing.
+  const userId = user?.id;
   const refreshProfile = useCallback(async () => {
-    if (user) {
-      const p = await fetchProfile(user.id);
-      if (p) setProfile(p);
-    }
-  }, [user]);
+    if (!userId) return;
+    const p = await fetchProfile(userId);
+    if (p) setProfile(p);
+  }, [userId]);
 
   // ── Auth actions ──
 
@@ -204,22 +220,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     wasAuthenticatedRef.current = true;
   }
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user, session, profile,
-        authLoading, profileLoading,
-        supabaseReady: isSupabaseConfigured,
-        isAuthenticated,
-        hasBeenAuthenticated: wasAuthenticatedRef.current,
-        signUp, signIn, signOut,
-        resetPassword, updatePassword,
-        refreshProfile,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  // Memoised so the context value keeps a stable identity between renders.
+  // A fresh object literal here would re-render every consumer on each render
+  // of this provider, regardless of whether anything actually changed.
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user, session, profile,
+      authLoading, profileLoading,
+      supabaseReady: isSupabaseConfigured,
+      isAuthenticated,
+      hasBeenAuthenticated: wasAuthenticatedRef.current,
+      signUp, signIn, signOut,
+      resetPassword, updatePassword,
+      refreshProfile,
+    }),
+    [
+      user, session, profile,
+      authLoading, profileLoading,
+      isAuthenticated,
+      signUp, signIn, signOut,
+      resetPassword, updatePassword,
+      refreshProfile,
+    ]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 // ── Helpers (module-private) ──
