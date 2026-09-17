@@ -1,6 +1,5 @@
 -- Canonical messaging core. Apply 010 and 011 in one maintenance transaction
 -- on databases still at 009; never expose 010 alone. Legacy data is retained.
-BEGIN;
 ALTER TABLE public.chat_rooms ADD COLUMN direct_a uuid REFERENCES public.profiles(id);
 ALTER TABLE public.chat_rooms ADD COLUMN direct_b uuid REFERENCES public.profiles(id);
 ALTER TABLE public.chat_members ADD COLUMN left_at timestamptz;
@@ -246,4 +245,3 @@ BEGIN
   END LOOP;
  END IF;
 END $$;
-COMMIT;
