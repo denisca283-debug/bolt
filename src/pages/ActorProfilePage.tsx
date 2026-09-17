@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  MapPin, Ruler, Calendar, Eye, Play, Share2, Mail, UserPlus,
+  Ruler, Calendar, Eye, Play, Mail, UserPlus,
   Check, Film, Camera, Star, ChevronLeft,
 } from 'lucide-react';
 import { actors } from '../data/mock';

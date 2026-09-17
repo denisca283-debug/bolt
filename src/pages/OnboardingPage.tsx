@@ -146,7 +146,7 @@ export function OnboardingPage() {
       {/* Progress */}
       <div className="px-4 sm:px-6 py-4 border-b border-line-soft">
         <div className="flex items-center gap-2 max-w-2xl mx-auto">
-          {STEPS.map((s, i) => (
+          {STEPS.map((s) => (
             <div key={s.num} className="flex items-center gap-2 flex-1">
               <div
                 className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${

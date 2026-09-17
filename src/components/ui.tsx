@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Share2, Check, Link2 } from 'lucide-react';
+import { Share2, Check } from 'lucide-react';
 
 type AvatarSize = 'xs' | 'sm' | 'md' | 'lg';
 
