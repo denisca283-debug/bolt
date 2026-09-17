@@ -20,12 +20,13 @@ const typeStyles: Record<string, string> = {
   'Продакшн': 'bg-orange-100 text-orange-700',
 };
 
-export function WorkCard({ opportunity }: { opportunity: WorkOpportunity }) {
+export function WorkCard({ opportunity, onOpen }: { opportunity: WorkOpportunity; onOpen?: () => void }) {
   const { navigate } = useRouter();
+  const openDetails = () => onOpen ? onOpen() : navigate('/work');
 
   return (
     <div
-      onClick={() => navigate('/work')}
+      onClick={openDetails}
       className="group surface p-5 hover:shadow-card hover:border-stone-400/40 transition-all duration-300 cursor-pointer animate-fade-up"
     >
       {/* Type label */}
@@ -79,13 +80,13 @@ export function WorkCard({ opportunity }: { opportunity: WorkOpportunity }) {
       {/* Actions */}
       <div className="mt-4 flex items-center gap-2">
         <button
-          onClick={(e) => { e.stopPropagation(); navigate('/work'); }}
+          onClick={(e) => { e.stopPropagation(); openDetails(); }}
           className="flex-1 btn-primary !py-2.5"
         >
           Откликнуться
         </button>
         <button
-          onClick={(e) => { e.stopPropagation(); navigate('/work'); }}
+          onClick={(e) => { e.stopPropagation(); openDetails(); }}
           className="btn-ghost !py-2.5"
         >
           Подробнее

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, t
 
 type RouterContextValue = {
   path: string;
+  search: string;
   navigate: (to: string) => void;
 };
 
@@ -19,7 +20,10 @@ function getInitialPath() {
 }
 
 export function RouterProvider({ children }: { children: ReactNode }) {
-  const [path, setPath] = useState(getInitialPath);
+  const [location, setPath] = useState(getInitialPath);
+  const separator = location.indexOf('?');
+  const path = separator < 0 ? location : location.slice(0, separator);
+  const search = separator < 0 ? '' : location.slice(separator + 1);
 
   useEffect(() => {
     const onHashChange = () => setPath(getInitialPath());
@@ -36,7 +40,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }, []);
 
-  const value = useMemo<RouterContextValue>(() => ({ path, navigate }), [path, navigate]);
+  const value = useMemo<RouterContextValue>(() => ({ path, search, navigate }), [path, search, navigate]);
 
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }

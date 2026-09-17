@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Search, ArrowRight } from 'lucide-react';
-import { actors, professionals } from '../data/mock';
+import { professionals } from '../data/mock';
+import { supabase } from '../lib/supabase';
+import type { Actor, PersonCardData } from '../types';
 import { ActorCard } from '../components/ActorCard';
 import { ProfessionalCard } from '../components/ProfessionalCard';
 import { useRouter } from '../router';
@@ -10,7 +13,6 @@ function getFeatured<T extends { featuredScore?: number }>(items: T[], count: nu
     .slice(0, count);
 }
 
-const featuredActors = getFeatured(actors, 7);
 const featuredProfessionals = getFeatured(professionals, 7);
 
 const HERO_IMG = 'https://images.pexels.com/photos/8089650/pexels-photo-8089650.jpeg?auto=compress&cs=tinysrgb&w=1600&h=900&dpr=2';
@@ -41,6 +43,49 @@ const entryPanels = [
 
 export function HomePage() {
   const { navigate } = useRouter();
+  const [query, setQuery] = useState('');
+  const [featuredActors, setFeaturedActors] = useState<PersonCardData[]>([]);
+  const [actorsLoading, setActorsLoading] = useState(true);
+  const [actorsError, setActorsError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadActors() {
+      try {
+        const { data, error } = await supabase.from('actors').select('*')
+          .order('featured_score', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        const actors = (data || []) as Actor[];
+        const userIds = [...new Set(actors.map((a) => a.user_id).filter(Boolean))] as string[];
+        const profiles = new Map<string, { public_slug: string | null; avatar_url: string | null }>();
+        if (userIds.length) {
+          const { data: rows, error: profileError } = await supabase.from('profiles')
+            .select('id, public_slug, avatar_url').in('id', userIds);
+          if (profileError) throw profileError;
+          for (const row of rows || []) profiles.set(row.id, row);
+        }
+        if (cancelled) return;
+        // Only feature cards with a real public profile destination.
+        setFeaturedActors(actors.filter((a) => a.user_id && profiles.get(a.user_id)?.public_slug)
+          .slice(0, 7).map((a) => ({
+            id: a.id,
+            slug: profiles.get(a.user_id!)!.public_slug,
+            name: a.full_name,
+            subtitle: a.category,
+            city: a.city,
+            photo: a.photo_url || a.gallery?.[0] || profiles.get(a.user_id!)?.avatar_url || null,
+            availability: a.availability,
+          })));
+      } catch {
+        if (!cancelled) setActorsError(true);
+      } finally {
+        if (!cancelled) setActorsLoading(false);
+      }
+    }
+    void loadActors();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="animate-fade-in">
@@ -83,15 +128,20 @@ export function HomePage() {
             </button>
           </div>
 
-          <div className="mt-6 relative max-w-xl">
+          <form className="mt-6 relative max-w-xl" onSubmit={(event) => {
+            event.preventDefault();
+            navigate(query.trim() ? `/actors?q=${encodeURIComponent(query.trim())}` : '/actors');
+          }}>
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-txt-muted" />
             <input
               type="text"
-              placeholder="Имя, профессия, типаж, проект…"
-              onFocus={() => navigate('/actors')}
+              placeholder="Имя, категория, город, навык…"
+              aria-label="Поиск актёров"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
               className="w-full bg-surface-700/80 backdrop-blur-md border border-white/10 rounded-xl pl-12 pr-4 py-4 text-base text-txt-primary placeholder:text-txt-muted focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition-all duration-200"
             />
-          </div>
+          </form>
         </div>
       </section>
 
@@ -116,20 +166,13 @@ export function HomePage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4">
-          {/* Still the demo set — the home page is the next page to move onto
-              real data, after the Actors and Specialists listings. */}
+          {actorsLoading && <p role="status" className="col-span-full text-sm text-txt-secondary">Загрузка актёров…</p>}
+          {actorsError && <p role="alert" className="col-span-full text-sm text-txt-secondary">Не удалось загрузить актёров. Попробуйте обновить страницу.</p>}
+          {!actorsLoading && !actorsError && featuredActors.length === 0 && <p className="col-span-full text-sm text-txt-secondary">Публичные анкеты актёров пока не добавлены.</p>}
           {featuredActors.map((actor) => (
             <ActorCard
               key={actor.id}
-              person={{
-                id: actor.id,
-                slug: null,
-                name: actor.name,
-                subtitle: actor.category,
-                city: actor.city,
-                photo: actor.photo,
-                availability: actor.availability,
-              }}
+              person={actor}
             />
           ))}
         </div>

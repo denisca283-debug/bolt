@@ -6,6 +6,8 @@ import {
 import { actors } from '../data/mock';
 import { useRouter } from '../router';
 import { Badge, ShareButton } from '../components/ui';
+import { useAuth } from '../hooks/useAuth';
+import { useAuthModal } from '../components/AuthModal';
 
 const statusColors: Record<string, string> = {
   'Профессиональный': 'chip-fern',
@@ -22,6 +24,15 @@ const availabilityColors: Record<string, string> = {
 
 export function ActorProfilePage({ actorId }: { actorId: string }) {
   const { navigate } = useRouter();
+  const { isAuthenticated } = useAuth();
+  const { promptGuest } = useAuthModal();
+  const writeMessage = () => {
+    if (!isAuthenticated) {
+      promptGuest({ message: 'Войдите, чтобы написать актёру. После входа вы останетесь в его карточке.' });
+      return;
+    }
+    navigate('/messages');
+  };
   const actor = actors.find((a) => a.id === actorId);
   const [activePhoto, setActivePhoto] = useState(0);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -152,7 +163,7 @@ export function ActorProfilePage({ actorId }: { actorId: string }) {
               Пригласить
             </button>
             <button
-              onClick={() => navigate('/messages')}
+              onClick={writeMessage}
               className="btn-secondary"
             >
               <Mail className="h-4 w-4" />

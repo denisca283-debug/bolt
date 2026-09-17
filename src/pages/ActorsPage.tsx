@@ -19,7 +19,8 @@ const availabilities = [ALL, 'Свободен', 'Ограниченно', 'За
 type ActorWithSlug = Actor & { slug: string | null; avatarUrl: string | null };
 
 export function ActorsPage() {
-  const { navigate } = useRouter();
+  const { navigate, search } = useRouter();
+  const query = (new URLSearchParams(search).get('q') || '').trim().toLocaleLowerCase('ru');
   const { isAuthenticated } = useAuth();
   const { openRegister } = useAuthModal();
 
@@ -84,6 +85,7 @@ export function ActorsPage() {
 
   const filtered = useMemo(() => {
     return rows.filter((a) => {
+      if (query && ![a.full_name, a.category, a.city, a.bio, ...(a.skills || [])].filter(Boolean).join(' ').toLocaleLowerCase('ru').includes(query)) return false;
       if (city !== ALL_CITIES && a.city !== city) return false;
       if (category !== ALL && a.category !== category) return false;
       if (gender === 'Мужчины' && a.gender !== 'М') return false;
@@ -91,7 +93,7 @@ export function ActorsPage() {
       if (availability !== ALL && a.availability !== availability) return false;
       return true;
     });
-  }, [rows, city, category, gender, availability]);
+  }, [rows, city, category, gender, availability, query]);
 
   const cards: PersonCardData[] = filtered.map((a) => ({
     id: a.id,
@@ -104,6 +106,7 @@ export function ActorsPage() {
   }));
 
   const activeFilterCount = [
+    Boolean(query),
     city !== ALL_CITIES,
     category !== ALL,
     gender !== ALL,
@@ -111,6 +114,7 @@ export function ActorsPage() {
   ].filter(Boolean).length;
 
   const resetFilters = () => {
+    if (query) navigate('/actors');
     setCity(ALL_CITIES);
     setCategory(ALL);
     setGender(ALL);

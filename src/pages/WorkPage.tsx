@@ -178,8 +178,8 @@ export function WorkPage() {
       {filtered.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
           {filtered.map((w) => (
-            <div key={w.id} onClick={() => setSelected(w)}>
-              <WorkCard opportunity={w} />
+            <div key={w.id}>
+              <WorkCard opportunity={w} onOpen={() => setSelected(w)} />
             </div>
           ))}
         </div>
