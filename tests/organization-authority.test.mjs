@@ -6,7 +6,10 @@ const ids=[1,2,3,4].map(n=>'10000000-0000-4000-8000-00000000000'+n);
 const [a,b,c,d]=ids;
 test('organization identity: replay, consent, invitation and adversarial authority',async t=>{
  const db=new PGlite();
- const q=async(sql,args=[]) => (await db.query(sql,args)).rows;
+ const q=async(sql,args=[]) => {
+  if(process.env.FILMVERSE_SQL_TRACE) console.error(sql.slice(0,120));
+  return (await db.query(sql,args)).rows;
+ };
  const scalar=async(sql,args=[])=>Object.values((await q(sql,args))[0])[0];
  const as=async(id,role='authenticated')=>{
   await db.exec('RESET ROLE');await q("SELECT set_config('request.jwt.claim.sub',$1,false)",[id||'']);await db.exec('SET ROLE '+role);
@@ -86,6 +89,41 @@ test('organization identity: replay, consent, invitation and adversarial authori
    assert.equal(await scalar('SELECT status FROM organization_invitations WHERE id=$1',[invite]),'expired');
    assert.equal(await scalar('SELECT count(*)::int FROM organization_members WHERE user_id=$1',[c]),0);
    await db.exec('RESET ROLE');await denied('DELETE FROM auth.users WHERE id=$1',[a]);
+  });
+  await t.test('producer content survives departure and account deletion; other company cannot take it',async()=>{
+   await as(a);const invite=await scalar("SELECT organization_invite($1,$2,'producer')",[org,b+'@example.test']);
+   await as(b);await q("SELECT organization_invitation_reply($1,'accept')",[invite]);
+   const project=await scalar("INSERT INTO projects(title,organization_id,visibility) VALUES('Company film',$1,'private') RETURNING id",[org]);
+   await q("INSERT INTO work_opportunities(title,type,audience,organization_id) VALUES('DP','job','professional',$1)",[org]);
+   await denied("UPDATE projects SET organization_id=NULL WHERE id=$1",[project]);
+   await q("SELECT organization_member_change($1,$2,'producer',false)",[org,b]);
+   assert.equal((await q("UPDATE projects SET title='stolen' WHERE id=$1 RETURNING id",[project])).length,0);
+   await db.exec('RESET ROLE');await q("SELECT set_config('request.jwt.claim.sub','',false)");
+   await q('DELETE FROM auth.users WHERE id=$1',[b]);
+   assert.equal(await scalar('SELECT organization_id FROM projects WHERE id=$1',[project]),org);
+   assert.equal(await scalar('SELECT user_id FROM projects WHERE id=$1',[project]),null);
+   await as(a);await q("UPDATE projects SET title='Still owned by company' WHERE id=$1",[project]);
+   await as(c);assert.equal((await q('SELECT id FROM projects WHERE id=$1',[project])).length,0);
+  });
+  await t.test('agency briefs/relations, rental packages and company billing never leak or cross tenants',async()=>{
+   await as(a);
+   const agency=await scalar("SELECT organization_create('Agency','the-agency','agency')");
+   const brief=await scalar("INSERT INTO organization_briefs(organization_id,title,confidential_budget) VALUES($1,'Client brief','private budget') RETURNING id",[agency]);
+   const inventory=await scalar("INSERT INTO organization_inventory_items(organization_id,category,custom_name,replacement_value) VALUES($1,'camera','Camera',100000) RETURNING id",[org]);
+   const pack=await scalar("INSERT INTO equipment_packages(organization_id,name) VALUES($1,'Camera package') RETURNING id",[org]);
+   await q("INSERT INTO equipment_package_items(organization_id,package_id,inventory_item_id) VALUES($1,$2,$3)",[org,pack,inventory]);
+   const otherPack=await scalar("INSERT INTO equipment_packages(organization_id,name) VALUES($1,'Other company package') RETURNING id",[agency]);
+   await assert.rejects(q("INSERT INTO equipment_package_items(organization_id,package_id,inventory_item_id) VALUES($1,$2,$3)",[agency,otherPack,inventory]),e=>e.code==='23503');
+   await q("INSERT INTO marketplace_listings(title,mode,organization_id,inventory_item_id) VALUES('Rental camera','rent',$1,$2)",[org,inventory]);
+   await denied("INSERT INTO organization_entitlements(organization_id,entitlement_code,source) VALUES($1,'organization_pro','test')",[org]);
+   await denied("INSERT INTO organization_campaign_daily_metrics(organization_id,promotion_id,day) VALUES($1,$2,current_date)",[org,crypto.randomUUID()]);
+   await assert.rejects(q("INSERT INTO organization_promotions(organization_id,product_code,targeting) VALUES($1,'brand_campaign',$2)",[agency,{religion:['x']}]),e=>e.code==='23514');
+   await as(c);assert.equal((await q('SELECT id FROM organization_briefs WHERE id=$1',[brief])).length,0);
+   assert.equal((await q('SELECT id FROM organization_inventory_items')).length,0);
+   assert.equal((await q('SELECT id FROM project_organizations')).length,0);
+   assert.equal((await q('SELECT id FROM organization_entitlements')).length,0);
+   await denied("INSERT INTO marketplace_listings(title,mode,organization_id) VALUES('Unauthorized','rent',$1)",[org]);
+   await as(null,'anon');await denied('SELECT * FROM organization_briefs');await denied('SELECT * FROM organization_entitlements');
   });
  }finally{await db.close();}
 });
