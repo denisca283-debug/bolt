@@ -1,5 +1,5 @@
-import { useState, useEffect, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
-import { X, Mail, Lock, User, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
+import { X, Mail, Lock, User, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRouter } from '../router';
 
@@ -36,11 +36,16 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [emailConfirmSent, setEmailConfirmSent] = useState(false);
+  const [signupNotice, setSignupNotice] = useState(false);
+  const attemptRef = useRef(0);
+  const submittingRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
+  // Close modal via useEffect when auth state flips to authenticated
   useEffect(() => {
     if (isAuthenticated && open) {
       setOpen(false);
+      setPassword('');
       setError(null);
       setLoading(false);
       setGuestMessage(null);
@@ -48,18 +53,24 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, open]);
 
   const openLogin = useCallback(() => {
+    attemptRef.current++;
+    submittingRef.current = false;
+    setLoading(false);
     setMode('login');
     setGuestMessage(null);
     setError(null);
-    setEmailConfirmSent(false);
+    setSignupNotice(false);
     setOpen(true);
   }, []);
 
   const openRegister = useCallback(() => {
+    attemptRef.current++;
+    submittingRef.current = false;
+    setLoading(false);
     setMode('register');
     setGuestMessage(null);
     setError(null);
-    setEmailConfirmSent(false);
+    setSignupNotice(false);
     setOpen(true);
   }, []);
 
@@ -69,29 +80,75 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   }, [openLogin, openRegister]);
 
   const promptGuest = useCallback((opts: GuestPromptOptions) => {
+    attemptRef.current++;
+    submittingRef.current = false;
+    setLoading(false);
     setGuestMessage(opts.message);
     setMode('login');
     setError(null);
-    setEmailConfirmSent(false);
+    setSignupNotice(false);
     setOpen(true);
   }, []);
 
   const closeAuth = useCallback(() => {
+    attemptRef.current++;
+    submittingRef.current = false;
+    setLoading(false);
     setOpen(false);
     setGuestMessage(null);
     setError(null);
     setLoading(false);
+    setPassword('');
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]'
+    ) || []).filter((element) => element.getClientRects().length > 0);
+    (dialog?.querySelector<HTMLElement>('input') || focusable()[0] || dialog)?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAuth();
+      }
+      if (event.key === 'Tab') {
+        const elements = focusable();
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        if (!first) { event.preventDefault(); dialog?.focus(); return; }
+        if (!dialog?.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [open, closeAuth]);
+
   const switchMode = (m: AuthMode) => {
+    attemptRef.current++;
+    submittingRef.current = false;
+    setLoading(false);
     setMode(m);
     setError(null);
     setGuestMessage(null);
-    setEmailConfirmSent(false);
+    setSignupNotice(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+    const attempt = ++attemptRef.current;
     setError(null);
     setLoading(true);
 
@@ -106,9 +163,11 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    submittingRef.current = true;
     try {
       if (mode === 'login') {
         const result = await signIn(email, password);
+        if (attemptRef.current !== attempt) return;
         if (result.error) {
           setError(result.error);
           setLoading(false);
@@ -116,39 +175,37 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
         }
       } else {
         const result = await signUp(fullName, email, password);
+        if (attemptRef.current !== attempt) return;
         if (result.error) {
           setError(result.error);
           setLoading(false);
           return;
         }
-        if (result.needsEmailConfirm) {
-          setEmailConfirmSent(true);
+        if (result.outcome === 'CHECK_EMAIL') {
+          setPassword('');
+          setSignupNotice(true);
           setLoading(false);
           return;
         }
       }
     } catch {
-      setError('Не удалось подключиться к FilmVerse. Попробуйте ещё раз.');
-      setLoading(false);
+      if (attemptRef.current === attempt) setError('Не удалось подключиться к FilmVerse. Попробуйте ещё раз.');
+    } finally {
+      if (attemptRef.current === attempt) {
+        submittingRef.current = false;
+        setLoading(false);
+      }
     }
-
-    setTimeout(() => {
-      setLoading((prev) => {
-        if (prev) {
-          setError('Не удалось подключиться к FilmVerse. Попробуйте ещё раз.');
-          return false;
-        }
-        return prev;
-      });
-    }, 8000);
   };
 
-  const title = emailConfirmSent
-    ? 'Проверьте email'
+  const title = signupNotice
+    ? 'Проверьте почту или войдите'
     : guestMessage
     ? null
     : mode === 'login' ? 'Вход' : 'Регистрация';
 
+  // Memoised for the same reason as the router/auth contexts: a fresh object
+  // literal here re-renders every consumer on each render of this provider.
   const modalValue = useMemo(
     () => ({ openAuth, openLogin, openRegister, promptGuest, closeAuth }),
     [openAuth, openLogin, openRegister, promptGuest, closeAuth]
@@ -160,7 +217,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fade-in">
           <div className="absolute inset-0 bg-base-950/70 backdrop-blur-sm" onClick={closeAuth} />
-          <div className="relative w-full max-w-sm surface p-6 animate-scale-in">
+          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title || 'Вход в FilmVerse'} tabIndex={-1} className="relative w-full max-w-sm surface p-6 animate-scale-in">
             <button
               onClick={closeAuth}
               className="absolute top-3 right-3 text-txt-muted hover:text-txt-primary transition-colors"
@@ -169,41 +226,27 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
               <X className="h-5 w-5" />
             </button>
 
-            {emailConfirmSent ? (
+            {signupNotice ? (
               <div className="text-center py-4">
                 <div className="flex justify-center mb-4">
-                  <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+                  <Mail className="h-12 w-12 text-emerald-500" />
                 </div>
-                <h2 className="font-display text-xl font-semibold text-txt-primary mb-3">
-                  Проверьте email
-                </h2>
-                <p className="text-sm text-txt-secondary leading-relaxed mb-3">
-                  Если <span className="text-txt-primary font-medium">{email}</span> — новый адрес,
-                  письмо с подтверждением придёт туда.
+                <p className="text-sm text-txt-secondary leading-relaxed mb-2">
+                  Если это новый адрес, проверьте почту: там может быть ссылка для подтверждения.
                 </p>
-                <p className="text-sm text-txt-secondary leading-relaxed mb-5">
-                  Если аккаунт FilmVerse на этот адрес уже существует, войдите или восстановите пароль.
+                <p className="text-sm text-txt-secondary leading-relaxed mb-4">
+                  Если у вас уже есть аккаунт FilmVerse, войдите или восстановите пароль.
                 </p>
-                <div className="space-y-2">
-                  <button
-                    onClick={() => switchMode('login')}
-                    className="btn-primary w-full"
-                  >
-                    Войти
-                  </button>
-                  <button
-                    onClick={() => { closeAuth(); navigate('/forgot-password'); }}
-                    className="btn-secondary w-full"
-                  >
-                    Восстановить пароль
-                  </button>
-                  <button
-                    onClick={closeAuth}
-                    className="w-full text-sm text-txt-muted hover:text-txt-secondary transition-colors py-2"
-                  >
-                    Продолжить просмотр
-                  </button>
+                <p className="text-xs text-txt-muted mb-6">
+                  Не пришло письмо? Проверьте папку «Спам».
+                </p>
+                <div className="flex flex-col gap-3 mb-4">
+                  <button onClick={() => switchMode('login')} className="btn-primary">Войти</button>
+                  <button onClick={() => { closeAuth(); navigate('/forgot-password'); }} className="text-sm text-txt-secondary">Забыли пароль?</button>
                 </div>
+                <button onClick={closeAuth} className="text-sm text-txt-secondary hover:text-emerald-500 transition-colors">
+                  Продолжить просмотр
+                </button>
               </div>
             ) : (
               <>
@@ -230,7 +273,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
                   <div className="mb-4 p-3 rounded-lg bg-warn-200/30 border border-warn-600/30 flex items-start gap-2">
                     <AlertCircle className="h-4 w-4 text-warn-700 shrink-0 mt-0.5" />
                     <p className="text-xs text-warn-700 leading-relaxed">
-                      Supabase не настроен. Проверьте переменные окружения deployment.
+                      Supabase не настроен. Проверьте .env
                     </p>
                   </div>
                 )}
