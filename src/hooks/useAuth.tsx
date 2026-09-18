@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { Profile } from '../types';
@@ -9,15 +9,10 @@ type AuthContextValue = {
   profile: Profile | null;
   authLoading: boolean;
   profileLoading: boolean;
+  profileError: string | null;
   supabaseReady: boolean;
   isAuthenticated: boolean;
   passwordRecoveryActive: boolean;
-  // True once the user has successfully authenticated at least once in this
-  // tab and hasn't explicitly signed out since. Used to avoid flashing a
-  // "logged out" UI (nav, guards) during a transient/unexpected session gap
-  // (e.g. a background token-refresh hiccup), while still resetting cleanly
-  // on a real, user-initiated sign-out.
-  hasBeenAuthenticated: boolean;
   signUp: (fullName: string, email: string, password: string) => Promise<{ error: string | null; needsEmailConfirm: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
@@ -25,6 +20,11 @@ type AuthContextValue = {
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
   refreshProfile: () => Promise<void>;
 };
+
+type ProfileFetchResult =
+  | { status: 'found'; profile: Profile }
+  | { status: 'missing' }
+  | { status: 'error'; message: string };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -40,155 +40,190 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
-  const profileEnsureRef = useRef<string | null>(null);
-  const wasAuthenticatedRef = useRef(false);
-  const explicitSignOutRef = useRef(false);
 
-  // ── 1. Initial session (synchronous auth only — no profile queries) ──
+  // Supabase session is the only authentication source of truth.
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setAuthLoading(false);
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
+    let mounted = true;
+
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        if (error) {
+          console.error('getSession error:', error.message);
+          setSession(null);
+          setUser(null);
+          return;
+        }
+        setSession(data.session);
+        setUser(data.session?.user ?? null);
+      })
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        console.error('getSession failed:', error);
+        setSession(null);
+        setUser(null);
+      })
+      .finally(() => {
+        if (mounted) setAuthLoading(false);
+      });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession((prev) => {
+        if (!newSession) return null;
+        if (
+          prev?.access_token === newSession.access_token &&
+          prev?.refresh_token === newSession.refresh_token
+        ) {
+          return prev;
+        }
+        return newSession;
+      });
+
+      setUser((prev) => {
+        if (!newSession) return null;
+        return prev?.id === newSession.user.id ? prev : newSession.user;
+      });
+
+      if (!newSession) {
+        setProfile(null);
+        setProfileError(null);
+      }
+
+      if (event === 'SIGNED_OUT') {
+        setPasswordRecoveryActive(false);
+      }
+
+      if (event === 'PASSWORD_RECOVERY' && newSession) {
+        setPasswordRecoveryActive(true);
+        window.location.hash = '/reset-password';
+      }
+
       setAuthLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
-      // Only clear user/session on an explicit sign-out.
-      // Transient null sessions during token refresh must not reset auth state.
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
-        setPasswordRecoveryActive(false);
-        if (explicitSignOutRef.current) {
-          // The user actually clicked "Выйти" — fully reset the grace flag so
-          // nav/guards immediately treat this tab as a fresh guest.
-          wasAuthenticatedRef.current = false;
-          explicitSignOutRef.current = false;
-        }
-        // Otherwise this SIGNED_OUT came from Supabase itself (e.g. a failed
-        // background token refresh) — keep wasAuthenticatedRef true so the UI
-        // doesn't flicker into a half-guest state for what may be transient.
-      } else if (newSession) {
-        // Supabase re-fires SIGNED_IN / TOKEN_REFRESHED whenever the tab
-        // regains focus, on visibility changes and on every token refresh.
-        // Calling setState unconditionally handed every consumer a BRAND NEW
-        // `user`/`session` object each time — even when nothing had actually
-        // changed. Any effect keyed on those objects (e.g. ProfilePage's data
-        // loader) then re-ran on every event, which is what made pages reload
-        // over and over. Keep the previous object when it is the same user /
-        // the same token, so identity stays stable.
-        setSession((prev) =>
-          prev?.access_token === newSession.access_token &&
-          prev?.refresh_token === newSession.refresh_token
-            ? prev
-            : newSession
-        );
-        setUser((prev) => (prev?.id === newSession.user.id ? prev : newSession.user));
-
-        if (event === 'PASSWORD_RECOVERY') {
-          setPasswordRecoveryActive(true);
-          window.location.hash = '/reset-password';
-        }
-      }
-    });
-
     return () => {
+      mounted = false;
       listener.subscription.unsubscribe();
     };
   }, []);
 
-  // ── 2. Profile loading (separate effect, keyed on user.id) ──
+  const userId = user?.id;
+
+  // Profile state is separate from auth state. A profile/RLS/network failure
+  // must never log the user out or be treated as "profile does not exist".
   useEffect(() => {
-    if (!user) {
+    if (!userId || !user) {
       setProfile(null);
       setProfileLoading(false);
-      profileEnsureRef.current = null;
+      setProfileError(null);
       return;
     }
 
-    // Avoid duplicate ensure calls for the same user
-    if (profileEnsureRef.current === user.id) return;
-    profileEnsureRef.current = user.id;
-
     let cancelled = false;
     setProfileLoading(true);
+    setProfileError(null);
 
     (async () => {
-      const p = await fetchProfile(user.id);
+      const result = await fetchProfile(userId);
       if (cancelled) return;
 
-      if (p) {
-        setProfile(p);
+      if (result.status === 'found') {
+        setProfile(result.profile);
         setProfileLoading(false);
         return;
       }
 
-      // No profile row — create one idempotently
+      if (result.status === 'error') {
+        setProfileError(result.message);
+        setProfileLoading(false);
+        return;
+      }
+
+      // A confirmed NOT_FOUND is the only state in which we bootstrap a
+      // profile row for an authenticated auth user.
       const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Пользователь';
-      const slug = generateUniqueSlug(fullName, user.id);
+      const slug = generateUniqueSlug(fullName, userId);
       const { error: insertErr } = await supabase.from('profiles').insert({
-        id: user.id,
+        id: userId,
         full_name: fullName,
         public_slug: slug,
         onboarding_completed: false,
       });
+
       if (cancelled) return;
 
-      if (insertErr) {
-        // Likely a duplicate key — another tab or the signup path already created it.
-        // Re-fetch instead of failing.
-        const retry = await fetchProfile(user.id);
-        if (!cancelled) {
-          setProfile(retry);
-          setProfileLoading(false);
-        }
+      if (insertErr && insertErr.code !== '23505') {
+        setProfileError('Не удалось создать профиль. Обновите страницу или попробуйте позже.');
+        setProfileLoading(false);
         return;
       }
 
-      // Read back the freshly inserted row
-      const fresh = await fetchProfile(user.id);
-      if (!cancelled) {
-        setProfile(fresh);
-        setProfileLoading(false);
+      // A duplicate can happen when another tab created the row first.
+      const retry = await fetchProfile(userId);
+      if (cancelled) return;
+
+      if (retry.status === 'found') {
+        setProfile(retry.profile);
+        setProfileError(null);
+      } else if (retry.status === 'error') {
+        setProfileError(retry.message);
+      } else {
+        setProfileError('Профиль не найден после входа. Попробуйте обновить страницу.');
       }
+      setProfileLoading(false);
     })();
 
-    return () => { cancelled = true; };
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, user]);
 
-  // ── Refresh helper (call from UI when profile was edited) ──
-  // Keyed on the user id (a string), not the user object, so this callback
-  // keeps a stable identity across auth events that don't change who is
-  // logged in — otherwise every consumer holding it re-renders for nothing.
-  const userId = user?.id;
   const refreshProfile = useCallback(async () => {
     if (!userId) return;
-    const p = await fetchProfile(userId);
-    if (p) setProfile(p);
+    setProfileLoading(true);
+    setProfileError(null);
+
+    const result = await fetchProfile(userId);
+    if (result.status === 'found') {
+      setProfile(result.profile);
+    } else if (result.status === 'error') {
+      setProfileError(result.message);
+    } else {
+      setProfile(null);
+      setProfileError('Профиль не найден.');
+    }
+    setProfileLoading(false);
   }, [userId]);
 
-  // ── Auth actions ──
-
   const signUp = useCallback(async (fullName: string, email: string, password: string) => {
-    if (!isSupabaseConfigured) return { error: 'Supabase не настроен.', needsEmailConfirm: false };
+    if (!isSupabaseConfigured) {
+      return { error: 'Supabase не настроен.', needsEmailConfirm: false };
+    }
 
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } },
     });
-    if (error) return { error: translateAuthError(error.message), needsEmailConfirm: false };
 
-    const needsEmailConfirm = !data.session && !!data.user;
-    return { error: null, needsEmailConfirm };
-    // Profile creation is handled by the user.id effect above,
-    // which fires when onAuthStateChange delivers the session.
+    if (error) {
+      return { error: translateAuthError(error.message), needsEmailConfirm: false };
+    }
+
+    // Supabase intentionally does not always reveal whether an email already
+    // exists. The UI therefore uses privacy-safe wording for this state.
+    return {
+      error: null,
+      needsEmailConfirm: !data.session && !!data.user,
+    };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -199,21 +234,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    explicitSignOutRef.current = true;
     await supabase.auth.signOut();
-    // onAuthStateChange will clear user/session (and the grace flag, since
-    // explicitSignOutRef is set).
-    // Clear profile synchronously so UI updates immediately.
+    setSession(null);
+    setUser(null);
     setProfile(null);
-    profileEnsureRef.current = null;
+    setProfileError(null);
+    setPasswordRecoveryActive(false);
   }, []);
 
   const resetPassword = useCallback(async (email: string) => {
     if (!isSupabaseConfigured) return { error: 'Supabase не настроен.' };
-    // Supabase's implicit recovery flow returns its session in the URL hash.
-    // A hash-router URL here would compete with that fragment and prevent the
-    // client from reading the recovery tokens. Route after PASSWORD_RECOVERY
-    // fires instead.
+    // The recovery fragment is consumed by Supabase first; routing switches
+    // to /reset-password only after PASSWORD_RECOVERY fires.
     const redirectTo = window.location.origin;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) return { error: translateAuthError(error.message) };
@@ -228,32 +260,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   }, []);
 
-  const isAuthenticated = !!user && !!session;
-  if (isAuthenticated) {
-    wasAuthenticatedRef.current = true;
-  }
+  const isAuthenticated = Boolean(session?.user?.id && user?.id === session.user.id);
 
-  // Memoised so the context value keeps a stable identity between renders.
-  // A fresh object literal here would re-render every consumer on each render
-  // of this provider, regardless of whether anything actually changed.
   const value = useMemo<AuthContextValue>(
     () => ({
-      user, session, profile,
-      authLoading, profileLoading,
+      user,
+      session,
+      profile,
+      authLoading,
+      profileLoading,
+      profileError,
       supabaseReady: isSupabaseConfigured,
       isAuthenticated,
       passwordRecoveryActive,
-      hasBeenAuthenticated: wasAuthenticatedRef.current,
-      signUp, signIn, signOut,
-      resetPassword, updatePassword,
+      signUp,
+      signIn,
+      signOut,
+      resetPassword,
+      updatePassword,
       refreshProfile,
     }),
     [
-      user, session, profile,
-      authLoading, profileLoading, passwordRecoveryActive,
+      user,
+      session,
+      profile,
+      authLoading,
+      profileLoading,
+      profileError,
       isAuthenticated,
-      signUp, signIn, signOut,
-      resetPassword, updatePassword,
+      passwordRecoveryActive,
+      signUp,
+      signIn,
+      signOut,
+      resetPassword,
+      updatePassword,
       refreshProfile,
     ]
   );
@@ -261,19 +301,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// ── Helpers (module-private) ──
-
-async function fetchProfile(userId: string): Promise<Profile | null> {
+async function fetchProfile(userId: string): Promise<ProfileFetchResult> {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', userId)
     .maybeSingle();
+
   if (error) {
     console.error('fetchProfile error:', error.message);
-    return null;
+    return {
+      status: 'error',
+      message: 'Не удалось загрузить профиль. Сессия сохранена — попробуйте обновить страницу.',
+    };
   }
-  return data as Profile | null;
+
+  if (!data) return { status: 'missing' };
+  return { status: 'found', profile: data as Profile };
 }
 
 function generateUniqueSlug(name: string, id: string): string {
@@ -290,6 +334,7 @@ function transliterate(name: string): string {
     'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
     'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
   };
+
   return name
     .toLowerCase()
     .trim()
@@ -303,7 +348,7 @@ function translateAuthError(msg: string): string {
   if (msg.includes('User already registered')) return 'Пользователь с таким email уже зарегистрирован.';
   if (msg.includes('Password should be at least')) return 'Пароль должен содержать минимум 6 символов.';
   if (msg.includes('Unable to validate email')) return 'Некорректный email.';
-  if (msg.includes('Email not confirmed')) return 'Сначала подтвердите email. Мы отправляли вам письмо после регистрации.';
+  if (msg.includes('Email not confirmed')) return 'Сначала подтвердите email.';
   if (msg.includes('For security purposes')) return 'Ссылка восстановления устарела. Запросите новую.';
   if (msg.includes('Token has expired or is invalid')) return 'Ссылка восстановления устарела. Запросите новую.';
   if (msg.includes('Password')) return 'Пароль слишком короткий — минимум 6 символов.';
