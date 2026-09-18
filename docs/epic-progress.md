@@ -12,7 +12,8 @@ Auth preserves live sessions on temporary validation failure with a retry warnin
 invalid tokens, expiry and sign-out become guests. SDK SIGNED_IN hydration races
 are covered. Existing messaging convergence and historical 011 are unchanged.
 Browser fixtures verified manually; standalone Chromium launch is sandbox-blocked.
-Automated browser suite and secret-free CI workflow added, CI result pending.
+Automated browser suite and secret-free CI workflow added. Linux CI passed all
+53 tests and all 12 Playwright scenarios: run 35343238948, code 5f4176a6.
 STOP for architectural review: no merge, no production migration, no product expansion.
 
 ## Continuation: messaging schema convergence (prepared, NOT applied)

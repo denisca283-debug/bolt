@@ -78,6 +78,12 @@ Local standalone Chromium cannot launch (macOS bootstrap_check_in permission
 denied); twelve launch failures are infrastructure failures, NOT twelve passes.
 Secret-free GitHub Actions workflow prepares an independent Linux browser run.
 
+**CI completed successfully:** code commit 5f4176a6d775c9c3aac70a62ccedfba3e601efe2,
+[Foundation checks run 35343238948](https://github.com/denisca283-debug/bolt/actions/runs/35343238948).
+All install/typecheck/lint/53 tests/build steps pass; **12 Playwright tests passed
+in 1.1 minutes** on Linux. This resolves the automated browser execution gate,
+without pretending that local standalone Chromium launched successfully.
+
 In-app browser manual checks of isolated browser-harness confirmed: temporary
 getUser failure retains authenticated Settings plus warning; online retry clears
 warning; logout prompts guest login; invalid token gives guest; profile DB failure
@@ -104,4 +110,5 @@ and disabled leaked-password protection. Links:
 Other-table privacy, payment abuse controls and full live acceptance are not
 certified here. Existing polling/mock content are not redesigned in this packet.
 Ready for architectural REVIEW, not authorization to start Resume/Skills/Crew
-Builder: await review and browser/live acceptance. No merge or production apply.
+Builder: automated gates are green; await review and the separate live acceptance.
+No merge or production apply.
