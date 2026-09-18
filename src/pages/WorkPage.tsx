@@ -22,7 +22,7 @@ function daysAgo(iso: string) {
   return `${d} дн. назад`;
 }
 
-export function WorkPage() {
+export function WorkPage({ id }: { id?: string }) {
   const organization = useOrganization();
   const { user } = useAuth();
   const { promptGuest } = useAuthModal();
@@ -35,7 +35,7 @@ export function WorkPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(id || null);
 
   const [query, setQuery] = useState('');
   const [audience, setAudience] = useState<(typeof AUDIENCES)[number]>('Все');
@@ -43,11 +43,9 @@ export function WorkPage() {
   const [city, setCity] = useState('Все');
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('work_opportunities')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(300);
+    let request = supabase.from(id ? 'work_opportunities' : 'work_opportunities_discovery').select('*');
+    if (id) request = request.eq('id', id);
+    const { data, error } = await request.order('created_at', { ascending: false }).limit(id ? 1 : 300);
 
     if (error) {
       setSchemaMissing(true);
@@ -76,7 +74,7 @@ export function WorkPage() {
       ));
     }
     setLoading(false);
-  }, []);
+  }, [id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -87,7 +85,7 @@ export function WorkPage() {
       if (!cancelled && data) setDepartments(data as Department[]);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [id]);
 
   const cities = useMemo(() => {
     const set = new Set(items.map((i) => i.city).filter(Boolean) as string[]);

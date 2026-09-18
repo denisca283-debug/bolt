@@ -31,6 +31,41 @@ async function setup(page,{signedIn=false,validation='ok',profileError=false}={}
   return state;
 }
 
+test('unlisted company and content resolve directly, but discovery excludes them',async({page})=>{
+ await setup(page);
+ await page.route('**/rest/v1/rpc/company_search',r=>r.fulfill({json:[]}));
+ await page.route('**/rest/v1/rpc/company_public',r=>r.fulfill({json:{id:'hidden',name:'Unlisted studio',organization_type:'studio'}}));
+ await page.route('**/rest/v1/rpc/company_team',r=>r.fulfill({json:[]}));
+ await page.goto('/#/companies');await expect(page.getByText('По этим условиям компаний не найдено.')).toBeVisible();
+ await page.goto('/#/company/unlisted');await expect(page.getByRole('heading',{name:'Unlisted studio'})).toBeVisible();
+ await page.route('**/rest/v1/projects*',r=>r.fulfill({json:new URL(r.request().url()).pathname.endsWith('_discovery')?[]:{title:'Direct project',description:'Link only'}}));
+ await page.goto('/#/projects');await expect(page.getByText('Direct project')).toHaveCount(0);
+ await page.goto('/#/project/hidden');await expect(page.getByRole('heading',{name:'Direct project'})).toBeVisible();
+});
+test('Resume bearer link uses explicit RPC token; plain id cannot open link-only publication',async({page})=>{
+ await setup(page);const token='a'.repeat(64);
+ await page.route('**/rest/v1/rpc/resume_read',r=>r.fulfill({json:r.request().postDataJSON().p_token===token?{id:'resume',user_id:user.id,display_name:'Resume identity',headline:'Independent resume',custom_professions:[],cities:[],description:'Public professional data'}:null}));
+ await page.goto('/#/resume/resume');await expect(page.getByText('Резюме не опубликовано или недоступно.')).toBeVisible();
+ await page.goto('/#/resume-share/resume/'+token);await expect(page.getByRole('heading',{name:'Independent resume'})).toBeVisible();
+ await expect(page.getByText('Resume identity')).toBeVisible();
+ await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
+});
+test('invitation names company and admin cannot offer privileged roles',async({page})=>{
+ await setup(page,{signedIn:true});
+ const company={id:'company-a',name:'Managed Studio',slug:'managed',organization_type:'studio'};
+ await page.route('**/rest/v1/organizations*',r=>r.fulfill({json:[company]}));
+ await page.route('**/rest/v1/organization_members*',r=>r.fulfill({json:[{organization_id:company.id,user_id:user.id,role:'admin',active:true}]}));
+ await page.route('**/rest/v1/organization_role_permissions*',r=>r.fulfill({json:[{role_key:'admin',permission:'manage_members'}]}));
+ await page.route('**/rest/v1/organization_roles*',r=>r.fulfill({json:['owner','admin','finance','producer','member'].map(key=>({key,label:key}))}));
+ await page.route('**/rest/v1/rpc/organization_invitation_cards',r=>r.fulfill({json:[{id:'invite',organization_id:'private-company-id',organization_name:'Inviting Film School',organization_type:'education',role_key:'member',status:'pending',is_recipient:true,expires_at:'2027-01-01'}]}));
+ await page.goto('/#/organizations');await expect(page.getByText(/Inviting Film School/)).toBeVisible();
+ await expect(page.getByText(/private-company-id/)).toHaveCount(0);
+ await page.getByRole('button',{name:/Managed Studio/}).click();
+ const options=page.getByLabel('Роль приглашённого').locator('option');await expect(options).toHaveCount(2);
+ expect(await options.allTextContents()).toEqual(['producer','member']);
+ await expect(page.getByLabel('Роль '+user.id,{exact:true})).toBeDisabled();
+});
+
 test('guest app load, auth modal close, protected route and invalid recovery route',async({page})=>{
   await setup(page); await page.goto('/');
   const trigger=page.getByRole('button',{name:'Регистрация',exact:true}).last();

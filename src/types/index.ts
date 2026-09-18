@@ -73,7 +73,7 @@ export type UserProfession = {
 export type Skill = {
   id: string;
   name: string;
-  scope?: 'actor' | 'professional';
+  scope?: 'actor' | 'professional' | 'both';
   department_id?: string | null;
   category?: string;
   sort_order?: number;

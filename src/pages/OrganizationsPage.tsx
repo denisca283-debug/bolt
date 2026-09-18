@@ -5,10 +5,11 @@ import { supabase } from '../lib/supabase';
 import { useRouter } from '../router';
 import { ModalShell } from '../components/ModalShell';
 import { CreateDialog, type CreateKind } from '../components/create/CreateDialog';
+import { canOfferOrganizationRole } from '../lib/organizationRoles';
 import { OrganizationRecords } from '../components/OrganizationRecords';
 
 type Dictionary = { key: string; label: string };
-type Invite = { id: string; organization_id: string; invited_email: string; role_key: string; status: string; expires_at: string };
+type Invite = { id: string; organization_id: string; organization_name: string; organization_type: string; inviter_name: string | null; is_recipient: boolean; role_key: string; status: string; expires_at: string };
 type Member = { user_id: string; role: string; active: boolean; public_visible: boolean };
 export function OrganizationsPage() {
   const context = useOrganization();
@@ -22,9 +23,9 @@ export function OrganizationsPage() {
     let stale = false;
     void (async () => {
       try {
-        const [t, i] = await Promise.all([supabase.from('organization_types').select('key,label'), supabase.from('organization_invitations').select('id,organization_id,invited_email,role_key,status,expires_at').eq('status', 'pending').limit(50)]);
+        const [t, i] = await Promise.all([supabase.from('organization_types').select('key,label'), supabase.rpc('organization_invitation_cards')]);
         if (t.error || i.error) throw new Error('load');
-        if (!stale) { setTypes(t.data || []); setInvites(i.data || []); }
+        if (!stale) { setTypes(t.data || []); setInvites((i.data || []).filter((v: Invite) => v.status === 'pending')); }
       } catch { if (!stale) setError('Не удалось загрузить справочник и приглашения.'); }
     })(); return () => { stale = true; };
   }, [revision]);
@@ -42,7 +43,7 @@ export function OrganizationsPage() {
     <div className="grid gap-3 sm:grid-cols-2">{context.organizations.map(o => <button key={o.id} className={`surface p-4 text-left ${context.selected?.id === o.id ? 'ring-1 ring-emerald-500' : ''}`} onClick={() => context.select(o.id)}><strong>{o.name}</strong><p className="text-sm text-txt-muted">{types.find(t => t.key === o.organization_type)?.label || o.organization_type} · {o.city}</p></button>)}</div>
     {!context.loading && !context.error && !context.organizations.length && <p>Пока вы не состоите в компаниях. Создайте свою или примите приглашение.</p>}
     {context.selected && <CompanyWorkspace key={context.selected.id} company={context.selected} />}
-    {!!invites.length && <section className="surface p-5 space-y-3"><h2 className="font-semibold">Приглашения</h2><p className="text-xs text-txt-muted">Письма автоматически не отправляются. Получатель увидит приглашение после входа с подтверждённым адресом.</p>{invites.map(invite => <div key={invite.id} className="border-t border-line-soft py-3"><p>{invite.invited_email} · {invite.role_key}</p><p className="text-xs">Компания: {context.organizations.find(o => o.id === invite.organization_id)?.name || invite.organization_id} · до {new Date(invite.expires_at).toLocaleDateString('ru')}</p><div className="flex gap-3 mt-2">{context.can('manage_members', invite.organization_id) ? <button onClick={() => void reply(invite.id, 'revoke')}>Отозвать</button> : <><button onClick={() => void reply(invite.id, 'accept')}>Принять</button><button onClick={() => void reply(invite.id, 'decline')}>Отклонить</button></>}</div></div>)}</section>}
+    {!!invites.length && <section className="surface p-5 space-y-3"><h2 className="font-semibold">Приглашения</h2><p className="text-xs text-txt-muted">Письма автоматически не отправляются. Получатель увидит приглашение после входа с подтверждённым адресом.</p>{invites.map(invite => <div key={invite.id} className="border-t border-line-soft py-3"><p>{invite.organization_name} · {invite.role_key}{invite.inviter_name ? ` · Пригласил(а): ${invite.inviter_name}` : ''}</p><p className="text-xs">Компания: {types.find(t => t.key === invite.organization_type)?.label || invite.organization_type} · до {new Date(invite.expires_at).toLocaleDateString('ru')}</p><div className="flex gap-3 mt-2">{!invite.is_recipient && context.can('manage_members', invite.organization_id) ? <button onClick={() => void reply(invite.id, 'revoke')}>Отозвать</button> : <><button onClick={() => void reply(invite.id, 'accept')}>Принять</button><button onClick={() => void reply(invite.id, 'decline')}>Отклонить</button></>}</div></div>)}</section>}
     {creating && <CreateCompany types={types} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); context.refresh(); }} />}
   </section>;
 }
@@ -69,7 +70,9 @@ function CompanyWorkspace({ company }: { company: Organization }) {
     catch { setError('Изменение не сохранено. Проверьте права и поля. Последний владелец не может покинуть компанию.'); }
     finally { setBusy(false); }
   };
-  const ownMember = members.find(m => m.user_id === user?.id);
+  const ownMember = members.find(m => m.user_id === user?.id && m.active);
+  const lastOwner = members.filter(m => m.active && m.role === 'owner').length === 1;
+  const canChange = (m: Member) => canOfferOrganizationRole(ownMember?.role, m.role, m.role, m.user_id === user?.id, lastOwner && m.role === 'owner');
   return <section className="surface p-5 space-y-5">
     <div><h2 className="text-xl font-semibold">{company.name}</h2><button className="text-emerald-500" onClick={() => navigate('/company/' + company.slug)}>Открыть публичную страницу</button></div>
     <p className="text-sm text-txt-muted">{company.organization_type === 'agency' ? 'Брифы, проекты и партнёры' : company.organization_type === 'rental_house' ? 'Инвентарь, комплекты и предложения аренды' : 'Проекты и найм команды'}</p>
@@ -85,9 +88,9 @@ function CompanyWorkspace({ company }: { company: Organization }) {
       <label className="block"><input type="checkbox" checked={draft.search_engine_indexable} onChange={e => setDraft({ ...draft, search_engine_indexable: e.target.checked })} /> Разрешить индексацию поисковиками</label>
       <button className="btn-secondary" disabled={busy}>Сохранить профиль компании</button>
     </form>}
-    {context.can('manage_members') && <section className="space-y-3 border-t border-line-soft pt-4"><h3 className="font-semibold">Команда и доступ</h3>{members.map(m => <div key={m.user_id} className="flex flex-wrap gap-3 items-center"><span className="text-xs break-all">{m.user_id === user?.id ? 'Вы' : m.user_id} {!m.active && '(доступ закрыт)'}</span><select aria-label={`Роль ${m.user_id}`} disabled={busy || !m.active} className="input-field !w-auto" value={m.role} onChange={e => void act(() => supabase.rpc('organization_member_change', { p_org: company.id, p_user: m.user_id, p_role: e.target.value, p_active: true }), 'Роль обновлена.')}>
-      {roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select>{m.active && <button disabled={busy} onClick={() => void act(() => supabase.rpc('organization_member_change', { p_org: company.id, p_user: m.user_id, p_role: m.role, p_active: false }), 'Доступ отозван.')}>Отозвать доступ</button>}</div>)}
-      <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void act(() => supabase.rpc('organization_invite', { p_org: company.id, p_email: email, p_role: role }), 'Приглашение сохранено. Письмо не отправлялось: получатель увидит приглашение в разделе «Мои компании».'); }}><input aria-label="Email приглашённого" type="email" className="input-field flex-1" required value={email} onChange={e => setEmail(e.target.value)} /><select aria-label="Роль приглашённого" className="input-field !w-auto" value={role} onChange={e => setRole(e.target.value)}>{roles.filter(r => r.key !== 'owner').map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select><button className="btn-secondary" disabled={busy}>Пригласить</button></form>
+    {context.can('manage_members') && <section className="space-y-3 border-t border-line-soft pt-4"><h3 className="font-semibold">Команда и доступ</h3>{members.map(m => <div key={m.user_id} className="flex flex-wrap gap-3 items-center"><span className="text-xs break-all">{m.user_id === user?.id ? 'Вы' : m.user_id} {!m.active && '(доступ закрыт)'}</span><select aria-label={`Роль ${m.user_id}`} disabled={busy || !m.active || !canChange(m)} className="input-field !w-auto" value={m.role} onChange={e => void act(() => supabase.rpc('organization_member_change', { p_org: company.id, p_user: m.user_id, p_role: e.target.value, p_active: true }), 'Роль обновлена.')}>
+      {roles.filter(r => r.key === m.role || canOfferOrganizationRole(ownMember?.role, r.key, m.role, m.user_id === user?.id, lastOwner && m.role === 'owner')).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select>{m.active && canChange(m) && <button disabled={busy} onClick={() => void act(() => supabase.rpc('organization_member_change', { p_org: company.id, p_user: m.user_id, p_role: m.role, p_active: false }), 'Доступ отозван.')}>Отозвать доступ</button>}</div>)}
+      <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void act(() => supabase.rpc('organization_invite', { p_org: company.id, p_email: email, p_role: role }), 'Приглашение сохранено. Письмо не отправлялось: получатель увидит приглашение в разделе «Мои компании».'); }}><input aria-label="Email приглашённого" type="email" className="input-field flex-1" required value={email} onChange={e => setEmail(e.target.value)} /><select aria-label="Роль приглашённого" className="input-field !w-auto" value={role} onChange={e => setRole(e.target.value)}>{roles.filter(r => canOfferOrganizationRole(ownMember?.role, r.key)).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select><button className="btn-secondary" disabled={busy}>Пригласить</button></form>
     </section>}
     <OrganizationRecords company={company} />
     {ownMember?.active && <div className="border-t border-line-soft pt-4 space-y-3"><label className="block"><input type="checkbox" disabled={busy} checked={ownMember.public_visible} onChange={e => void act(() => supabase.from('organization_members').update({ public_visible: e.target.checked }).eq('organization_id', company.id).eq('user_id', user!.id).select('user_id').single(), 'Согласие обновлено.')} /> Показывать меня в публичной команде</label><button disabled={busy} onClick={() => void act(() => supabase.rpc('organization_member_change', { p_org: company.id, p_user: user!.id, p_role: ownMember.role, p_active: false }), 'Вы покинули компанию. Обновите список компаний.')}>Покинуть компанию</button></div>}

@@ -22,7 +22,7 @@ export function SkillsPicker({ skills, selectedIds, onChange, actor = false, dep
 
   const q = query.trim().toLowerCase();
   const visible = skills.filter(s => s.is_active !== false && (!q || s.name.toLowerCase().includes(q)))
-    .filter(s => all || selectedIds.includes(s.id) || (actor ? s.scope === 'actor' : s.scope === 'professional' && (!departmentId || s.department_id === departmentId)))
+    .filter(s => all || selectedIds.includes(s.id) || s.scope === 'both' || (actor ? s.scope === 'actor' : s.scope === 'professional' && (!departmentId || s.department_id === departmentId)))
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 
   const toggle = (id: string) => {
@@ -62,7 +62,7 @@ export function SkillsPicker({ skills, selectedIds, onChange, actor = false, dep
             const active = selectedIds.includes(s.id);
             return (
               <Fragment key={s.id}>
-              {(index === 0 || visible[index - 1].category !== s.category) && <h3 className="w-full text-xs font-semibold text-txt-muted mt-2">{s.scope === 'actor' ? 'Актёрские' : 'Профессиональные'} · {categoryLabels[s.category || 'other'] || s.category}</h3>}
+              {(index === 0 || visible[index - 1].category !== s.category) && <h3 className="w-full text-xs font-semibold text-txt-muted mt-2">{s.scope === 'both' ? 'Общие' : s.scope === 'actor' ? 'Актёрские' : 'Профессиональные'} · {categoryLabels[s.category || 'other'] || s.category}</h3>}
               <button
                 key={s.id}
                 type="button"

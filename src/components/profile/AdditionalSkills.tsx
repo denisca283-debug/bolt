@@ -48,10 +48,10 @@ export function AdditionalSkills({ userId, editable }: { userId: string; editabl
     <h2 className="font-semibold">Свои навыки и опыт работы</h2>
     {loading && <p role="status">Загрузка…</p>}
     {error && <p role="alert">{error} <button onClick={() => setRevision(n => n + 1)}>Повторить</button></p>}
-    <div className="flex flex-wrap gap-2">{skills.map(skill => <span key={skill.id} className="rounded-lg border border-line-soft px-3 py-2">{skill.name} <small>({skill.scope === 'actor' ? 'актёрский' : 'профессиональный'})</small>{editable && <button disabled={busy} type="button" aria-label={`Удалить навык ${skill.name}`} onClick={() => void mutate('remove', skill.id)} className="ml-2">×</button>}</span>)}</div>
+    <div className="flex flex-wrap gap-2">{skills.map(skill => <span key={skill.id} className="rounded-lg border border-line-soft px-3 py-2">{skill.name} <small>({skill.scope === 'both' ? 'общий' : skill.scope === 'actor' ? 'актёрский' : 'профессиональный'})</small>{editable && <button disabled={busy} type="button" aria-label={`Удалить навык ${skill.name}`} onClick={() => void mutate('remove', skill.id)} className="ml-2">×</button>}</span>)}</div>
     {editable && <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void mutate('add'); }}>
       <label className="sr-only" htmlFor="custom-skill">Свой навык</label><input id="custom-skill" className="input-field flex-1 min-w-40" required minLength={2} maxLength={80} value={name} onChange={e => setName(e.target.value)} placeholder="Название своего навыка" />
-      <select aria-label="Область навыка" className="input-field !w-auto" value={scope} onChange={e => setScope(e.target.value)}><option value="professional">Профессиональный</option><option value="actor">Актёрский</option></select>
+      <select aria-label="Область навыка" className="input-field !w-auto" value={scope} onChange={e => setScope(e.target.value)}><option value="professional">Профессиональный</option><option value="actor">Актёрский</option><option value="both">Общий</option></select>
       <button className="btn-secondary" disabled={busy || loading}>+ Добавить свой навык</button>
     </form>}
     <h3 className="text-sm font-medium">Опыт в форматах — это не навыки</h3>

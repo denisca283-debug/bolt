@@ -1,6 +1,9 @@
 # Product layer II — architectural review handoff
 
 Status: review candidate, **not production-ready and not a claim that every product surface is complete**.
+Correction stage: see the explicit implementation boundary below. The original
+36-point inventory describes the initial candidate; corrections here supersede
+its Resume audience, invitation UI and skill-scope descriptions.
 Reviewed base: `950dca2759ae283d6bb8c2e3d5590ce9ba445d4d`.
 No production SQL writes, migrations, seeds, merge or production deployment were performed.
 The existing foundation PR #3 is not expanded. Review this as a stacked change.
@@ -45,6 +48,54 @@ The existing foundation PR #3 is not expanded. Review this as a stacked change.
 36. **Casting Room readiness.** Private applicant context, canonical direct chat, media scopes and company hiring permissions are available. Reviewer shortlist/waitlist/reject/approve, role-specific submissions and complete casting workflows remain unbuilt.
 
 ## Future connections / review gates
+
+## Stage 1 correction — implementation boundary
+
+**IMPLEMENTED UI:** independent Resume audience editor (`public`, `hiring_members`,
+`link_only`), deliberately editable professional display name, create/rotate and
+revoke bearer links; safe invitation company names and optional privacy-filtered
+inviter names; role options constrained by actual owner/admin transition rules;
+cross-role skills in both pickers; content discovery reads filtered views while
+direct `/work/:id`, `/project/:id`, `/listing/:id` and company routes retain RLS.
+
+**IMPLEMENTED DATABASE FOUNDATION:** new corrective migration
+`20260919002944_product_layer_ii_corrections.sql`; explicit contact/media SELECT
+grants with unchanged audience guards; representations remain raw-owner-only,
+with safe redacted RPC for other permitted viewers, including work context.
+Public Resume no longer calls `person_visible`; only its explicit publication
+fields are returned, never private profile fields. Hiring audience checks active
+personal vacancies, non-completed personal projects with a declared stage, or
+active organization `publish_jobs`/`review_applications` membership. A vacancy's
+`hiring_active` flag is persisted and protected by existing ownership rules.
+Link-only publications are not enumerable in discovery and cannot be read by ID;
+an explicit 64-hex-character random bearer is hashed with SHA-256 in a private
+RLS table. Owners may rotate/revoke it. Pause, expiry and entitlement revocation
+also block shared reads. The link is a transferable capability, not a recipient
+identity guarantee; users are warned before sharing. Raw keys are never listed.
+Legacy private publications become link-only without a generated key (still
+owner-only); old members publications become hiring-only (narrower audience).
+Canonical/custom skill scopes support `both` without new copies or changed IDs.
+Structured language/proficiency storage exists separately from generic skills.
+
+**FUTURE ONLY:** a language editor, full hiring lifecycle UI (including vacancy
+closure rather than current removal), hosted end-to-end integration, and a
+dedicated Resume search screen. Existing directory pages still cap content lists;
+this correction does not claim complete server pagination for every legacy page.
+Full shared inbox, advertising execution and other incomplete surfaces above
+remain unbuilt. No Model/Student work belongs in this PR.
+
+**Security evidence:** role-switched PostgreSQL tests cover explicit GRANTs,
+public/members/private/work-context contacts/media/representations, private
+profile + public Resume, hiring denial/allow, invalid/revoked link, raw-key denial,
+safe invitation access and direct-vs-discovery behavior. Browser fixtures verify
+the corresponding presentation/API request boundaries; they are not hosted
+Supabase proof. Correction gates passed: npm ci; typecheck; lint (0 errors/7
+warnings); all 75 Node tests including chronological replay and adversarial RLS;
+build; 26 desktop/mobile Playwright scenarios. Fresh dependency audit: 21
+advisories (3 low, 5 moderate, 13 high), no dependency changes. Hosted advisor
+still reports 8 exposed-definer warnings and disabled leaked-password protection;
+read-only inspection does not validate unapplied migrations. PR #4 is frozen for
+review after this correction; next work starts on its stacked branch.
 
 Final leakage review: person-owned Pulse rows now obey person visibility under a restrictive read policy. Company publication no longer emits an employee-owned public Pulse event: a private company's title must not leak through that legacy side effect. Company activity needs a future canonical visibility-aware event path. System-owned Pulse records remain trusted-server-only as in the reviewed foundation.
 

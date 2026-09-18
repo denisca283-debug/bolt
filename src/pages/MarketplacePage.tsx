@@ -41,7 +41,7 @@ export function MarketplacePage() {
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
-      .from('marketplace_listings')
+      .from('marketplace_listings_discovery')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(300);

@@ -25,7 +25,7 @@ export function ProjectsPage() {
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
-      .from('projects')
+      .from('projects_discovery')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(200);
