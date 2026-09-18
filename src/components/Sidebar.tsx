@@ -8,10 +8,8 @@ import { useAuthModal } from './AuthModal';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { path, navigate } = useRouter();
-  const { profile, user, isAuthenticated, hasBeenAuthenticated, signOut } = useAuth();
+  const { profile, user, isAuthenticated, signOut } = useAuth();
   const { openLogin, openRegister } = useAuthModal();
-  // See TopBar: avoid flashing guest UI during a transient session gap.
-  const showAuthedUI = isAuthenticated || hasBeenAuthenticated;
 
   const go = (to: string) => {
     navigate(to);
@@ -36,7 +34,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col bg-base-850">
-      {/* Logo */}
       <button
         onClick={() => go('/')}
         className="flex items-center gap-2.5 px-5 h-16 shrink-0 border-b border-line-soft"
@@ -44,7 +41,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <Logo size={32} variant="emerald" showText />
       </button>
 
-      {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
         <p className="px-3.5 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-txt-muted">
           Меню
@@ -52,8 +48,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         {navItems.map((item) => {
           const active = isActive(item.path);
           const Icon = item.icon;
-          // Show private items only when authenticated
-          if (item.requiresAuth && !showAuthedUI) return null;
+          if (item.requiresAuth && !isAuthenticated) return null;
           return (
             <button
               key={item.path}
@@ -71,7 +66,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
 
-        {showAuthedUI && (
+        {isAuthenticated && (
           <div className="pt-4 pb-2">
             <p className="px-3.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-txt-muted">
               Личное
@@ -88,9 +83,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </nav>
 
-      {/* Bottom section */}
       <div className="border-t border-line-soft p-3 space-y-0.5">
-        {showAuthedUI ? (
+        {isAuthenticated ? (
           <>
             <button
               onClick={() => go('/settings')}
