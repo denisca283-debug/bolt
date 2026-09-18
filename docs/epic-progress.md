@@ -1,5 +1,17 @@
 # FilmVerse epic — first review packet
 
+## Continuation: messaging schema convergence (prepared, NOT applied)
+
+Added `20260918212540_messaging_schema_convergence.sql` without changing 011.
+Reconciles missing list/unread RPCs, canonical/legacy write restrictions, schema
+privileges and Realtime registration. Full clean SQL replay and A/B/C/D database
+tests added; history/read cursors retained. See
+[review and upgrade limitations](messaging-convergence-review.md).
+Complete suite: 42 passing tests; typecheck/build pass; lint 0 errors, 6 warnings.
+Production migration/merge and two-browser Realtime acceptance remain outstanding.
+Populated pre-011 environments require separately reviewed preflight/repair; a
+post-011 migration cannot repair a failure inside the historical 011.
+
 ## Continuation: profile security gate (prepared, NOT applied to live DB)
 
 New migration `20260918211553_profile_column_security.sql` removes client writes
