@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchIndexing } from '../hooks/useSearchIndexing';
 import {
   MapPin, Calendar, Mail, Camera, Briefcase, Check, Loader2, Edit3, X,
   AlertCircle, Clapperboard, Sparkles,
@@ -9,7 +10,6 @@ import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from '../components/AuthModal';
 import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
-import { PROFILE_FIELDS } from '../lib/profile-fields';
 import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
 import { SkillsPicker } from '../components/profile/SkillsPicker';
 import { MessageButton } from '../components/MessageButton';
@@ -158,6 +158,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   const [galleryUploading, setGalleryUploading] = useState(false);
 
   const displayProfile = isOwnProfile ? ownProfile : targetProfile;
+  useSearchIndexing(!isOwnProfile && !!targetProfile?.search_engine_indexable);
 
   // Key the loader on the user ID (a string), never on the `user` object.
   // Supabase hands out a new user object on every auth event (tab focus,
@@ -202,11 +203,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     }
 
     // Public profile lookup by slug — must work for guests too.
-    const { data: profileRow, error: profileErr } = await supabase
-      .from('profiles')
-      .select(PROFILE_FIELDS)
-      .eq('public_slug', slug)
-      .maybeSingle();
+    const { data: profileRow, error: profileErr } = await supabase.rpc('person_public', { p_slug: slug });
 
     if (profileErr || !profileRow) {
       setNotFound(true);

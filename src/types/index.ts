@@ -1,4 +1,5 @@
 export type Profile = {
+  search_engine_indexable?: boolean;
   id: string;
   full_name: string | null;
   public_slug: string | null;

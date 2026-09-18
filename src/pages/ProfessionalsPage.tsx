@@ -49,103 +49,26 @@ export function ProfessionalsPage() {
   const [availability, setAvailability] = useState(ALL);
   const [search, setSearch] = useState('');
 
+  const [offset, setOffset] = useState(0);
+  const [error, setError] = useState('');
+  useEffect(() => { setOffset(0); }, [selectedDept, selectedProfession, availability, search]);
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      setLoading(true);
-
-      const [deptRes, profRes, upRes] = await Promise.all([
+    let cancelled = false; setLoading(true); setError('');
+    void (async () => {
+      const [depts, profs, people] = await Promise.all([
         supabase.from('departments').select('*').order('sort_order'),
         supabase.from('professions').select('*').order('sort_order'),
-        // One row per specialist: their primary profession.
-        supabase
-          .from('user_professions')
-          .select('user_id, profession_id, experience_years')
-          .eq('is_primary', true),
+        supabase.rpc('professional_directory', { p_query: search, p_department: selectedDept,
+          p_profession: selectedProfession, p_offset: offset,
+          p_availability: Object.entries(AVAILABILITY_LABELS).find(([, label]) => label === availability)?.[0] || '' }),
       ]);
-
       if (cancelled) return;
-
-      const depts = (deptRes.data || []) as Department[];
-      const profs = (profRes.data || []) as Profession[];
-      const primaries = (upRes.data || []) as {
-        user_id: string;
-        profession_id: string;
-        experience_years: number | null;
-      }[];
-
-      setDepartments(depts);
-      setProfessions(profs);
-
-      const userIds = [...new Set(primaries.map((p) => p.user_id))];
-      if (userIds.length === 0) {
-        setSpecialists([]);
-        setLoading(false);
-        return;
-      }
-
-      // `user_professions.user_id` references auth.users, not profiles, so the
-      // profile and skills are fetched by id and stitched together here rather
-      // than embedded in the query above.
-      const [profileRes, skillRes] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('id, full_name, public_slug, city, avatar_url, availability_status')
-          .in('id', userIds),
-        supabase.from('user_skills').select('user_id, skill:skills(name)').in('user_id', userIds),
-      ]);
-
-      if (cancelled) return;
-
-      const profileById = new Map(
-        ((profileRes.data || []) as {
-          id: string;
-          full_name: string | null;
-          public_slug: string | null;
-          city: string | null;
-          avatar_url: string | null;
-          availability_status: string;
-        }[]).map((p) => [p.id, p])
-      );
-
-      const skillsByUser = new Map<string, string[]>();
-      for (const row of (skillRes.data || []) as unknown as {
-        user_id: string;
-        skill: { name: string } | null;
-      }[]) {
-        if (!row.skill) continue;
-        skillsByUser.set(row.user_id, [...(skillsByUser.get(row.user_id) || []), row.skill.name]);
-      }
-
-      const profById = new Map(profs.map((p) => [p.id, p]));
-
-      const built: Specialist[] = primaries.flatMap((p) => {
-        const profile = profileById.get(p.user_id);
-        const profession = profById.get(p.profession_id);
-        // A profile row is required — without one there is nothing to show or link to.
-        if (!profile || !profession) return [];
-        return [{
-          userId: p.user_id,
-          slug: profile.public_slug,
-          name: profile.full_name || 'Пользователь FilmVerse',
-          city: profile.city,
-          avatarUrl: profile.avatar_url,
-          availability: AVAILABILITY_LABELS[profile.availability_status] || 'Свободен',
-          professionId: profession.id,
-          professionName: profession.name,
-          departmentId: profession.department_id,
-          experienceYears: p.experience_years,
-          skills: skillsByUser.get(p.user_id) || [],
-        }];
-      });
-
-      setSpecialists(built);
-      setLoading(false);
-    })();
-
+      setDepartments(depts.data || []); setProfessions(profs.data || []);
+      setSpecialists(people.error ? [] : people.data || []);
+      setError(people.error || depts.error || profs.error ? 'Не удалось загрузить специалистов.' : ''); setLoading(false);
+    })().catch(() => { if (!cancelled) { setError('Нет соединения. Повторите загрузку.'); setLoading(false); } });
     return () => { cancelled = true; };
-  }, []);
+  }, [selectedDept, selectedProfession, availability, search, offset, isAuthenticated]);
 
   const filtered = useMemo(() => {
     return specialists.filter((p) => {
@@ -183,7 +106,8 @@ export function ProfessionalsPage() {
     );
   }
 
-  if (specialists.length === 0) {
+  if (error) return <p role="alert">{error}</p>;
+  if (specialists.length === 0 && !selectedDept && !selectedProfession && availability === ALL && !search && offset === 0) {
     return (
       <div className="animate-fade-in">
         <div className="mb-6">
@@ -333,6 +257,10 @@ export function ProfessionalsPage() {
       )}
 
       {/* Specialist cards */}
+      <div className="flex gap-3 mb-4">
+        <button className="btn-secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 24))}>Назад</button>
+        <button className="btn-secondary" disabled={specialists.length < 24} onClick={() => setOffset(offset + 24)}>Далее</button>
+      </div>
       {filtered.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 lg:gap-5">
           {filtered.map((pro) => (

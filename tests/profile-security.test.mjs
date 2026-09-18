@@ -107,7 +107,7 @@ test('browser profile projection excludes private date and wildcard reads', asyn
   assert.ok(!PROFILE_FIELDS.includes('onboarding_completed'));
   for (const file of ['src/hooks/useAuth.tsx', 'src/pages/ProfilePage.tsx']) {
     const source = await readFile(file, 'utf8');
-    assert.match(source, /from\('profiles'\)\.?(?:\s*)select\(PROFILE_FIELDS\)|from\('profiles'\)\s*\.select\(PROFILE_FIELDS\)/);
+    assert.ok(source.includes('.select(PROFILE_FIELDS)') || source.includes(".rpc('person_public'"));
     assert.doesNotMatch(source, /from\('profiles'\)\s*\.select\(['"]\*['"]\)/);
   }
 });

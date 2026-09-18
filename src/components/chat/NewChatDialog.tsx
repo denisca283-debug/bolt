@@ -49,13 +49,9 @@ export function NewChatDialog({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name, city, avatar_url')
-        .neq('id', currentUserId)
-        .order('full_name')
-        .limit(100);
+      const { data, error } = await supabase.rpc('person_recipients', { p_query: query, p_action: kind === 'direct' ? 'message' : 'invite' });
       if (cancelled) return;
+      if (error) setError('Не удалось загрузить получателей.');
       setCandidates(
         ((data || []) as { id: string; full_name: string | null; city: string | null; avatar_url: string | null }[])
           .map((p) => ({
@@ -67,7 +63,7 @@ export function NewChatDialog({
       );
     })();
     return () => { cancelled = true; };
-  }, [currentUserId]);
+  }, [currentUserId, query, kind]);
 
   const q = query.trim().toLowerCase();
   const visible = q

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { VerificationPanel } from '../components/VerificationPanel';
 import { useEntitlements } from '../hooks/useEntitlements';
+import { PrivacySettings } from '../components/PrivacySettings';
 
 export function SettingsPage() {
   const { user, profile, signOut } = useAuth();
@@ -33,7 +34,8 @@ export function SettingsPage() {
 
       <div className="space-y-4">
         {/* Verification — the real trust layer */}
-        <VerificationPanel />
+      {user && <PrivacySettings key={user.id} userId={user.id} />}
+      <VerificationPanel />
 
         {/* Account */}
         <div className="surface p-6 space-y-4">

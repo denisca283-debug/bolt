@@ -32,49 +32,23 @@ export function ActorsPage() {
   const [availability, setAvailability] = useState(ALL);
   const [showFilters, setShowFilters] = useState(false);
 
+  const [offset, setOffset] = useState(0);
+  const [error, setError] = useState('');
+  useEffect(() => { setOffset(0); }, [city, category, gender, availability]);
   useEffect(() => {
     let cancelled = false;
-
-    (async () => {
-      setLoading(true);
-
-      const { data: actorRows } = await supabase
-        .from('actors')
-        .select('*')
-        .order('created_at', { ascending: false });
-
+    setLoading(true); setError('');
+    void (async () => {
+      const { data, error } = await supabase.rpc('actor_directory', {
+        p_city: city === ALL_CITIES ? '' : city, p_category: category === ALL ? '' : category,
+        p_gender: gender === ALL ? '' : gender === 'Мужчины' ? 'М' : 'Ж',
+        p_availability: availability === ALL ? '' : availability, p_offset: offset,
+      });
       if (cancelled) return;
-
-      const actors = (actorRows || []) as Actor[];
-      const userIds = [...new Set(actors.map((a) => a.user_id).filter(Boolean))] as string[];
-
-      // `actors.user_id` points at profiles, but the public slug lives there —
-      // fetched separately so a card can link to the real profile page.
-      let slugById = new Map<string, { slug: string | null; avatarUrl: string | null }>();
-      if (userIds.length > 0) {
-        const { data: profileRows } = await supabase
-          .from('profiles')
-          .select('id, public_slug, avatar_url')
-          .in('id', userIds);
-        if (cancelled) return;
-        slugById = new Map(
-          ((profileRows || []) as { id: string; public_slug: string | null; avatar_url: string | null }[])
-            .map((p) => [p.id, { slug: p.public_slug, avatarUrl: p.avatar_url }])
-        );
-      }
-
-      setRows(
-        actors.map((a) => ({
-          ...a,
-          slug: a.user_id ? slugById.get(a.user_id)?.slug ?? null : null,
-          avatarUrl: a.user_id ? slugById.get(a.user_id)?.avatarUrl ?? null : null,
-        }))
-      );
-      setLoading(false);
-    })();
-
+      setRows(error ? [] : data || []); setError(error ? 'Не удалось загрузить актёров.' : ''); setLoading(false);
+    })().catch(() => { if (!cancelled) { setError('Нет соединения. Повторите загрузку.'); setLoading(false); } });
     return () => { cancelled = true; };
-  }, []);
+  }, [city, category, gender, availability, offset, isAuthenticated]);
 
   // Offer only cities that actually have someone in them.
   const cities = useMemo(() => {
@@ -147,7 +121,8 @@ export function ActorsPage() {
 
   // Nobody has filled in an actor profile yet. Say so plainly rather than
   // padding the page with invented people.
-  if (rows.length === 0) {
+  if (error) return <p role="alert">{error}</p>;
+  if (rows.length === 0 && activeFilterCount === 0 && offset === 0) {
     return (
       <div className="animate-fade-in">
         <div className="mb-6">
@@ -245,6 +220,10 @@ export function ActorsPage() {
       )}
 
       {/* Actor grid */}
+      <div className="flex gap-3 mb-4">
+        <button className="btn-secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 24))}>Назад</button>
+        <button className="btn-secondary" disabled={rows.length < 24} onClick={() => setOffset(offset + 24)}>Далее</button>
+      </div>
       {cards.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 lg:gap-5">
           {cards.map((person) => (
