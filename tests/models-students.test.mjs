@@ -66,13 +66,15 @@ test('models and student ecosystem: chronological PostgreSQL replay and adversar
   verification=await scalar('SELECT student_verification_submit($1,$2)',[affiliation,path]);
   assert.equal((await q('DELETE FROM storage.objects WHERE name=$1 RETURNING id',[path])).length,0,'submitted evidence must remain immutable');
   await denied("UPDATE student_verifications SET status='approved',valid_until=now()+interval '10 years' WHERE id=$1",[verification]);
-  await denied("SELECT student_verification_review($1,true,now()+interval '1 month')",[verification]);
+  await denied("SELECT student_verification_decide($1,true,now()+interval '1 month','Enrollment reviewed')",[verification]);
   await as(d);assert.equal((await q('SELECT * FROM student_verifications')).length,0);assert.equal((await q('SELECT id FROM storage.objects WHERE name=$1',[path])).length,0);
   await db.exec('RESET ROLE');await q("INSERT INTO user_permissions(user_id,permission_id) SELECT $1,id FROM permissions WHERE name='review_student_verification'",[b]);
   await q("INSERT INTO user_permissions(user_id,permission_id) SELECT $1,id FROM permissions WHERE name='review_student_verification'",[a]);
-  await as(a);await denied("SELECT student_verification_review($1,true,now()+interval '1 month')",[verification]);
-  await as(b);await assert.rejects(q("SELECT student_verification_review($1,true,now()+interval '2 years')",[verification]),e=>e.code==='22023');
-  await q("SELECT student_verification_review($1,true,now()+interval '1 month')",[verification]);
+  await as(a);await denied("SELECT student_verification_decide($1,true,now()+interval '1 month','Enrollment reviewed')",[verification]);
+  await as(b);const queue=await scalar('SELECT student_review_queue()');assert.equal(queue[0].user_id,a);assert.equal('email' in queue[0],false);assert.equal('dob' in queue[0],false);
+  await assert.rejects(q("SELECT student_verification_decide($1,true,now()+interval '2 years','Enrollment reviewed')",[verification]),e=>e.code==='22023');
+  await q("SELECT student_verification_decide($1,true,now()+interval '1 month','Enrollment reviewed')",[verification]);
+  assert.equal(await scalar('SELECT decision_reason FROM student_verifications WHERE id=$1',[verification]),'Enrollment reviewed');assert.ok(await scalar('SELECT reviewed_at FROM student_verifications WHERE id=$1',[verification]));
   await as(null,'anon');assert.equal(await scalar('SELECT student_badge($1)',[a]),true);
   assert.equal((await q('SELECT id FROM education_affiliations WHERE user_id=$1',[a])).length,0,'badge does not disclose school');
   await denied('SELECT * FROM student_verifications');
@@ -126,12 +128,39 @@ test('models and student ecosystem: chronological PostgreSQL replay and adversar
  await t.test('expiry and affiliation changes remove badge; PRO never re-verifies',async()=>{
   await db.exec('RESET ROLE');await q("UPDATE student_verifications SET verified_at=now()-interval '2 months',valid_until=now()-interval '1 month' WHERE id=$1",[verification]);
   await as(a);assert.equal(await scalar('SELECT student_badge($1)',[a]),false);assert.equal(await scalar('SELECT student_project_badge($1)',[project]),false);
-  await denied('SELECT support_request_create($1,$2)',[project,terms]);
+  await assert.rejects(q('SELECT support_request_create($1,$2)',[project,terms]),e=>e.code==='23514');
   await db.exec('RESET ROLE');await q("INSERT INTO account_entitlements(user_id,entitlement_code,source) VALUES($1,'pro','test')",[a]);
   await q("UPDATE student_verifications SET valid_until=now()+interval '1 month' WHERE id=$1",[verification]);
   await as(a);await q("UPDATE education_affiliations SET institution_name='Changed school' WHERE id=$1",[affiliation]);
   assert.equal(await scalar('SELECT student_badge($1)',[a]),false);await denied('UPDATE education_affiliations SET revision=1 WHERE id=$1',[affiliation]);
   await as(d);assert.equal((await q("UPDATE education_affiliations SET status='alumni' WHERE id=$1 RETURNING id",[affiliation])).length,0);
+ });
+ await t.test('basic help, company eligibility and type-aware fields work without claiming verification',async()=>{
+  await as(d);const basic=await scalar("INSERT INTO projects(title,student_project) VALUES('Self declared',true) RETURNING id");
+  const n=await scalar('SELECT support_request_create($1,$2)',[basic,{...terms,usage_rights:null,deliverables:null}]);assert.ok(n);
+  await assert.rejects(q('SELECT support_request_create($1,$2)',[basic,terms]),e=>e.code==='23514');
+  await as(b);const org=await scalar("SELECT organization_create('Helpful school','helpful-school','education')");
+  await q("INSERT INTO organization_student_support(organization_id,enabled,eligibility) VALUES($1,true,'all_student_projects')",[org]);
+  await as(d);assert.equal(await scalar('SELECT student_program_eligible($1,$2)',[org,basic]),true);
+  await as(b);await q("UPDATE organization_student_support SET eligibility='verified_only' WHERE organization_id=$1",[org]);
+  const orgProject=await scalar("INSERT INTO projects(title,organization_id,student_project) VALUES('School production',$1,true) RETURNING id",[org]);
+  assert.ok(await scalar('SELECT support_request_create($1,$2)',[orgProject,{...terms,need_type:'transport',usage_rights:null,deliverables:null}]));
+  await as(d);assert.equal(await scalar('SELECT student_program_eligible($1,$2)',[org,basic]),false);
+  await denied("INSERT INTO projects(title,organization_id,student_project) VALUES('Impersonation',$1,true)",[org]);
+ });
+ await t.test('canonical blocks reject new direct sends and invitations while retaining history',async()=>{
+  await as(a);const room=await scalar('SELECT get_or_create_direct_chat($1)',[b]);await q('SELECT chat_send($1,$2,$3)',[room,'History',crypto.randomUUID()]);
+  await as(b);await q("INSERT INTO profile_contacts(kind,value,visibility) VALUES('phone','visible-contact','public')");
+  await as(a);assert.equal((await q('SELECT value FROM profile_contacts WHERE user_id=$1',[b])).length,1);
+  await q('INSERT INTO user_blocks(blocked_user_id) VALUES($1)',[b]);
+  await denied('SELECT chat_send($1,$2,$3)',[room,'Blocked',crypto.randomUUID()]);
+  assert.equal((await q('SELECT id FROM chat_messages WHERE room_id=$1',[room])).length,1);
+  assert.equal((await q('SELECT value FROM profile_contacts WHERE user_id=$1',[b])).length,0);
+  await denied('INSERT INTO project_members(project_id,user_id) VALUES($1,$2)',[project,b]);
+  await as(b);await denied('SELECT chat_send($1,$2,$3)',[room,'Reverse blocked',crypto.randomUUID()]);
+  const org=await scalar("SELECT organization_create('Blocked invites','blocked-invites','production_company')");
+  await denied('SELECT organization_invite($1,$2,$3)',[org,a+'@test.invalid','member']);
+  await as(d);await q('INSERT INTO user_blocks(blocked_user_id) VALUES($1)',[b]);await denied('SELECT get_or_create_direct_chat($1)',[b]);
  });
  await t.test('new relations enforce RLS and private definers fix search_path',async()=>{
   await db.exec('RESET ROLE');

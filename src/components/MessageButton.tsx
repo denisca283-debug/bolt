@@ -1,3 +1,4 @@
+import { PersonBlockControl } from './PersonBlockControl';
 import { useState } from 'react';
 import { Mail, Loader2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -65,6 +66,7 @@ export function MessageButton({
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
         {label}
       </button>
+      {user && <PersonBlockControl userId={targetUserId}/>}
       {error && <p className="text-xs text-danger-700 max-w-[260px] leading-snug">{error}</p>}
     </div>
   );

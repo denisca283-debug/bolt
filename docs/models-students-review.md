@@ -1,5 +1,7 @@
 # FilmVerse — Models + Student Ecosystem: architectural review
 
+Stage A correction: see [pr5-correction-review.md](pr5-correction-review.md) for superseding support, blocking and reviewer rules.
+
 Status: draft stacked review; NOT a production rollout. No merge, production SQL, seed or manual production deployment.
 
 ## Stage 1 — PR #4 correction

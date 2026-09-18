@@ -112,8 +112,23 @@ test('student affiliation is private by default; self-declared project creates n
  await page.route('**/rest/v1/pulse_feed*',r=>{if(r.request().method()==='POST')pulseWrites++;return r.fulfill({json:[]});});
  await page.goto('/#/students');await page.getByRole('button',{name:'Добавить образование'}).click();let dialog=page.getByRole('dialog');await dialog.getByLabel('Учебное заведение',{exact:true}).fill('Киношкола');await dialog.getByLabel('Ожидаемый год выпуска').fill('2028');await dialog.getByRole('button',{name:'Сохранить образование'}).click();await expect(dialog).toHaveCount(0);expect(affiliations[0].visibility).toBe('private');
  await page.getByRole('button',{name:'Создать студенческий проект'}).click();dialog=page.getByRole('dialog');await dialog.getByLabel('Название',{exact:true}).fill('Дипломный фильм');await dialog.getByLabel('Город',{exact:true}).fill('Москва');await dialog.getByLabel('Тип / формат').fill('Короткий метр');await dialog.getByLabel('Кратко о проекте').fill('Учебный фильм');await dialog.getByRole('button',{name:'Сохранить студенческий проект'}).click();
- await expect(page.getByRole('heading',{name:'Дипломный фильм',exact:true})).toBeVisible();await expect(page.getByText('Студенческий проект — самоописание',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Попросить помощь'})).toHaveCount(0);
+ await expect(page.getByRole('heading',{name:'Дипломный фильм',exact:true})).toBeVisible();await expect(page.getByText('Студенческий проект — самоописание',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Попросить помощь'})).toBeVisible();
  expect(created.student_project).toBe(true);expect(created.visibility).toBe('private');expect(pulseWrites).toBe(0);
+});
+
+test('self-declared project offers basic mentorship without irrelevant rights and work never defaults to Model',async({page})=>{
+ await setup(page,{signedIn:true});
+ await page.route('**/rest/v1/projects*',r=>r.fulfill({json:{id:'basic-project',title:'Basic film',user_id:user.id,student_project:true,visibility:'public',city:'Москва'}}));
+ await page.route('**/rest/v1/project_support_requests*',r=>r.fulfill({json:[]}));
+ await page.goto('/#/project/basic-project');
+ await page.getByRole('button',{name:'Попросить помощь'}).click();
+ let dialog=page.getByRole('dialog');await dialog.getByLabel('Что нужно').selectOption('mentorship');
+ await expect(dialog.getByLabel('Права использования результата')).toHaveCount(0);
+ await expect(dialog.getByLabel('Тема консультации')).toBeVisible();
+ await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'Найти модель / актёра / специалиста'}).click();
+ dialog=page.getByRole('dialog');await expect(dialog.getByLabel('Тип роли')).toBeVisible();
+ await expect(dialog.getByText('Требования к модели — необязательно')).toHaveCount(0);
 });
 
 test('verified student project publishes structured help with explicit unpaid terms',async({page})=>{

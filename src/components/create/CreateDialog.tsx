@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import { useOrganization } from '../../hooks/useOrganization';
 import { addPulse } from '../../lib/pulse';
-import { compensationLabels } from '../../lib/modelTaxonomy';
+import { compensationLabels, modelCategories } from '../../lib/modelTaxonomy';
 import { CityInput } from '../CityInput';
 import type { Department, Profession } from '../../types';
 
@@ -15,6 +15,7 @@ type CreateDialogProps = {
   projectSource?: { id: string; title: string; city: string; visibility: string };
   rentalSource?: { title: string; category: string; city: string; description: string; inventory_item_id?: string; equipment_package_id?: string };
   initialKind?: CreateKind;
+  initialWorkTarget?: WorkTarget;
   allowKindSwitch?: boolean;
   onClose: () => void;
   /** Called once the row exists, so the caller can refresh or navigate. */
@@ -61,7 +62,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated, rentalSource, projectSource }: CreateDialogProps) {
+export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated, rentalSource, projectSource, initialWorkTarget = 'actor' }: CreateDialogProps) {
   const { user, profile } = useAuth();
   const organization = useOrganization();
   // Freeze author identity when opening: later context changes cannot silently
@@ -84,7 +85,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
   const [price, setPrice] = useState('');
 
   // Work
-  const [target, setTarget] = useState<WorkTarget>(projectSource ? 'model' : 'actor');
+  const [target, setTarget] = useState<WorkTarget>(initialWorkTarget);
   const [roleType, setRoleType] = useState('Главная роль');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [professions, setProfessions] = useState<Profession[]>([]);
@@ -98,6 +99,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
   const [expenses, setExpenses] = useState('');
   const [rights, setRights] = useState('');
   const [deliverables, setDeliverables] = useState('');
+  const [modelRequirements, setModelRequirements] = useState<Record<string,string|boolean|string[]>>({});
   const [spots, setSpots] = useState('');
 
   // Project
@@ -199,6 +201,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
           : target === 'extra' ? 'Массовка'
           : roleType,
         audience: targetDef.audience,
+        model_requirements: target === 'model' ? Object.fromEntries(Object.entries(modelRequirements).filter(([,v])=>v!=='')) : {},
         target_kinds: [target === 'model' ? 'models' : target === 'crew' ? 'crew' : 'actors'],
         compensation_type: target === 'model' ? compensation : null,
         expenses_covered: target === 'model' ? expenses : null,
@@ -430,11 +433,11 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
                   </Field>
                 </div>
               ) : target === 'model' ? (
-                <div className="space-y-3"><label className="block">Компенсация<select className="input-field" value={compensation} onChange={e=>setCompensation(e.target.value)}><option value="">Выберите явно</option>{Object.entries(compensationLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label className="block">Покрытие расходов<input className="input-field" maxLength={1000} value={expenses} onChange={e=>setExpenses(e.target.value)} /></label><label className="block">Права использования<input className="input-field" maxLength={2000} value={rights} onChange={e=>setRights(e.target.value)} /></label><label className="block">Ожидаемый результат<input className="input-field" maxLength={2000} value={deliverables} onChange={e=>setDeliverables(e.target.value)} /></label><p className="text-xs text-txt-muted">TFP — сотрудничество без оплаты, не оплачиваемая работа. Укажите также даты и город.</p></div>
+                <div className="space-y-3"><label className="block">Компенсация<select className="input-field" value={compensation} onChange={e=>setCompensation(e.target.value)}><option value="">Выберите явно</option>{Object.entries(compensationLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label className="block">Покрытие расходов<input className="input-field" maxLength={1000} value={expenses} onChange={e=>setExpenses(e.target.value)} /></label><label className="block">Права использования<input className="input-field" maxLength={2000} value={rights} onChange={e=>setRights(e.target.value)} /></label><label className="block">Ожидаемый результат<input className="input-field" maxLength={2000} value={deliverables} onChange={e=>setDeliverables(e.target.value)} /></label><fieldset className="space-y-2"><legend>Требования к модели — необязательно</legend><div className="grid grid-cols-2 gap-2">{[['height_min','Рост от, см'],['height_max','Рост до, см']].map(([k,label])=><label key={k}>{label}<input className="input-field" type="number" min={50} max={250} onChange={e=>setModelRequirements({...modelRequirements,[k]:e.target.value})}/></label>)}</div><div className="flex flex-wrap gap-2">{Object.entries(modelCategories).map(([k,label])=><label key={k}><input type="checkbox" onChange={e=>setModelRequirements(v=>({...v,categories:e.target.checked?[...(Array.isArray(v.categories)?v.categories:[]),k]:(Array.isArray(v.categories)?v.categories:[]).filter(x=>x!==k)}))}/>{label}</label>)}</div>{[['travel','Поездки'],['digitals_required','Нужны digitals'],['portfolio_required','Нужно портфолио']].map(([k,label])=><label className="block" key={k}><input type="checkbox" onChange={e=>setModelRequirements({...modelRequirements,[k]:e.target.checked})}/>{label}</label>)}</fieldset><p className="text-xs text-txt-muted">TFP — сотрудничество без оплаты, не оплачиваемая работа. Укажите также даты и город.</p></div>
               ) : target === 'actor' ? (
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Тип роли">
-                    <select value={roleType} onChange={(e) => setRoleType(e.target.value)} className="input-field">
+                    <select aria-label="Тип роли" value={roleType} onChange={(e) => setRoleType(e.target.value)} className="input-field">
                       {ROLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </Field>
