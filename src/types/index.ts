@@ -120,6 +120,79 @@ export type Actor = {
   updated_at: string;
 };
 
+// ── Content published by users ────────────────────────────────────
+// These mirror the tables from migrations 008/009. They replace the demo
+// rows in src/data/mock.ts wherever a page reads live data.
+
+export type MarketplaceListing = {
+  id: string;
+  user_id: string;
+  title: string;
+  mode: string;
+  category: string | null;
+  city: string | null;
+  price: string | null;
+  image_url: string | null;
+  description: string | null;
+  created_at: string;
+};
+
+export type WorkOpportunity = {
+  id: string;
+  user_id: string;
+  title: string;
+  type: string;
+  audience: string;
+  project_name: string | null;
+  city: string | null;
+  shoot_date: string | null;
+  age_range: string | null;
+  genre: string | null;
+  pay: string | null;
+  spots_total: number | null;
+  spots_left: number | null;
+  description: string | null;
+  applicants_count: number;
+  created_at: string;
+};
+
+export type ProjectRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  logline: string | null;
+  genre: string | null;
+  stage: string | null;
+  city: string | null;
+  director: string | null;
+  team_size: number | null;
+  image_url: string | null;
+  casting_roles: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type PulseEntry = {
+  id: string;
+  user_id: string | null;
+  kind: string;
+  person: string;
+  initials: string | null;
+  photo_url: string | null;
+  action: string;
+  target: string | null;
+  created_at: string;
+};
+
+/** Minimal author card shown next to a listing, job or project. */
+export type AuthorLite = {
+  id: string;
+  name: string;
+  slug: string | null;
+  avatarUrl: string | null;
+  city: string | null;
+};
+
 export type UserSkill = {
   id: string;
   user_id: string;

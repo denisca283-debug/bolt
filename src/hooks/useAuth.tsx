@@ -11,6 +11,7 @@ type AuthContextValue = {
   profileLoading: boolean;
   supabaseReady: boolean;
   isAuthenticated: boolean;
+  passwordRecoveryActive: boolean;
   // True once the user has successfully authenticated at least once in this
   // tab and hasn't explicitly signed out since. Used to avoid flashing a
   // "logged out" UI (nav, guards) during a transient/unexpected session gap
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
   const profileEnsureRef = useRef<string | null>(null);
   const wasAuthenticatedRef = useRef(false);
   const explicitSignOutRef = useRef(false);
@@ -62,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
+        setPasswordRecoveryActive(false);
         if (explicitSignOutRef.current) {
           // The user actually clicked "Выйти" — fully reset the grace flag so
           // nav/guards immediately treat this tab as a fresh guest.
@@ -87,6 +90,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             : newSession
         );
         setUser((prev) => (prev?.id === newSession.user.id ? prev : newSession.user));
+
+        if (event === 'PASSWORD_RECOVERY') {
+          setPasswordRecoveryActive(true);
+          window.location.hash = '/reset-password';
+        }
       }
     });
 
@@ -202,7 +210,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resetPassword = useCallback(async (email: string) => {
     if (!isSupabaseConfigured) return { error: 'Supabase не настроен.' };
-    const redirectTo = `${window.location.origin}/#/reset-password`;
+    // Supabase's implicit recovery flow returns its session in the URL hash.
+    // A hash-router URL here would compete with that fragment and prevent the
+    // client from reading the recovery tokens. Route after PASSWORD_RECOVERY
+    // fires instead.
+    const redirectTo = window.location.origin;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) return { error: translateAuthError(error.message) };
     return { error: null };
@@ -212,6 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return { error: 'Supabase не настроен.' };
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) return { error: translateAuthError(error.message) };
+    setPasswordRecoveryActive(false);
     return { error: null };
   }, []);
 
@@ -229,6 +242,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authLoading, profileLoading,
       supabaseReady: isSupabaseConfigured,
       isAuthenticated,
+      passwordRecoveryActive,
       hasBeenAuthenticated: wasAuthenticatedRef.current,
       signUp, signIn, signOut,
       resetPassword, updatePassword,
@@ -236,7 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [
       user, session, profile,
-      authLoading, profileLoading,
+      authLoading, profileLoading, passwordRecoveryActive,
       isAuthenticated,
       signUp, signIn, signOut,
       resetPassword, updatePassword,

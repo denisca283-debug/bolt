@@ -33,7 +33,9 @@ type CardProps = {
 
 export function Card({ children, className = '', raised = false, onClick }: CardProps) {
   return (
-    <div onClick={onClick} className={`bg-white border border-stone-300/60 rounded-xl ${raised ? 'shadow-soft-lg' : 'shadow-soft'} ${onClick ? 'cursor-pointer' : ''} ${className}`}>
+    // Was `bg-white`: a literal white box on the dark theme, with near-white
+    // text on it. Cards follow the surface tokens like every other panel.
+    <div onClick={onClick} className={`${raised ? 'bg-surface-500' : 'bg-surface-600'} border border-line rounded-xl ${raised ? 'shadow-soft-lg' : 'shadow-soft'} ${onClick ? 'cursor-pointer' : ''} ${className}`}>
       {children}
     </div>
   );

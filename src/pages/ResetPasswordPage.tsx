@@ -5,7 +5,7 @@ import { AuthLayout } from '../components/AuthLayout';
 import { useRouter } from '../router';
 
 export function ResetPasswordPage() {
-  const { updatePassword, supabaseReady } = useAuth();
+  const { updatePassword, supabaseReady, passwordRecoveryActive } = useAuth();
   const { navigate } = useRouter();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -58,22 +58,31 @@ export function ResetPasswordPage() {
     );
   }
 
+  if (!passwordRecoveryActive) {
+    return (
+      <AuthLayout title="Ссылка недействительна" subtitle="">
+        <div className="text-center py-4">
+          <AlertCircle className="h-12 w-12 text-warn-600 mx-auto mb-4" />
+          <p className="text-sm text-txt-secondary leading-relaxed mb-6">
+            Откройте актуальную ссылку из письма или запросите восстановление ещё раз.
+          </p>
+          <button
+            onClick={() => navigate('/forgot-password')}
+            className="btn-primary"
+          >
+            Запросить новую ссылку
+          </button>
+        </div>
+      </AuthLayout>
+    );
+  }
+
   return (
     <AuthLayout
       title="Новый пароль"
       subtitle="Придумайте новый пароль для вашего аккаунта"
       error={error}
     >
-      {/* Invalid/expired recovery link warning */}
-      {!supabaseReady && (
-        <div className="mb-4 p-3 rounded-lg bg-warn-200/30 border border-warn-600/30 flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 text-warn-700 shrink-0 mt-0.5" />
-          <p className="text-xs text-warn-700 leading-relaxed">
-            Ссылка восстановления может быть устаревшей. Если не удаётся изменить пароль, запросите новую ссылку.
-          </p>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-medium text-txt-secondary mb-1.5">Новый пароль</label>

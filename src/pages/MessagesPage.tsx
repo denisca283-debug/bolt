@@ -27,14 +27,14 @@ function timeLabel(iso: string | null) {
     : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
-export function MessagesPage() {
+export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {}) {
   const { user, profile } = useAuth();
   const { openLogin } = useAuthModal();
 
   const [rooms, setRooms] = useState<RoomView[]>([]);
   const [people, setPeople] = useState<Map<string, PersonLite>>(new Map());
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(initialRoomId ?? null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -42,9 +42,22 @@ export function MessagesPage() {
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
   const [verifiedTypes, setVerifiedTypes] = useState(0);
+  // Personal messages did not disappear when rooms arrived — they are the
+  // 'direct' kind. This filter keeps them a section of their own.
+  const [tab, setTab] = useState<'all' | 'direct' | 'group' | 'department'>('all');
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const appliedInitialRef = useRef<string | null>(null);
   const userId = user?.id;
+
+  // Arriving from "Написать" on a profile or listing: /messages/<roomId>.
+  // Applied once per id so it never fights a chat the person picked by hand.
+  useEffect(() => {
+    if (!initialRoomId) return;
+    if (appliedInitialRef.current === initialRoomId) return;
+    appliedInitialRef.current = initialRoomId;
+    setActiveRoomId(initialRoomId);
+  }, [initialRoomId]);
 
   // ── Rooms ────────────────────────────────────────────────────────
   const loadRooms = useCallback(async () => {
@@ -253,8 +266,39 @@ export function MessagesPage() {
       ) : (
         <div className="grid md:grid-cols-[300px_1fr] gap-4 lg:gap-5">
           {/* Room list */}
-          <div className={`space-y-1.5 ${activeRoomId ? 'hidden md:block' : ''}`}>
-            {rooms.map((r) => {
+          <div className={`${activeRoomId ? 'hidden md:block' : ''}`}>
+            {/* Kind filter — «Сообщения» are the personal ones */}
+            <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+              {([
+                { key: 'all', label: 'Все' },
+                { key: 'direct', label: 'Сообщения' },
+                { key: 'group', label: 'Группы' },
+                { key: 'department', label: 'Департаменты' },
+              ] as const).map((t) => {
+                const count = t.key === 'all' ? rooms.length : rooms.filter((r) => r.kind === t.key).length;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setTab(t.key)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all duration-200 ${
+                      tab === t.key
+                        ? 'bg-emerald-200/30 text-emerald-600 border-emerald-400/50'
+                        : 'bg-surface-700 text-txt-secondary border-line-soft hover:border-line'
+                    }`}
+                  >
+                    {t.label}{count > 0 && <span className="ml-1 text-txt-muted">{count}</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="space-y-1.5">
+            {rooms.filter((r) => tab === 'all' || r.kind === tab).length === 0 && (
+              <p className="text-xs text-txt-muted py-4 text-center">
+                {tab === 'direct' ? 'Личной переписки пока нет' : 'В этой категории пусто'}
+              </p>
+            )}
+            {rooms.filter((r) => tab === 'all' || r.kind === tab).map((r) => {
               const Icon = KIND_ICON[r.kind] || MessageSquare;
               const active = r.id === activeRoomId;
               const subtitle = r.last_message_text
@@ -285,6 +329,7 @@ export function MessagesPage() {
                 </button>
               );
             })}
+            </div>
           </div>
 
           {/* Conversation */}
