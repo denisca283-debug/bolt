@@ -23,7 +23,6 @@ type MessageButtonProps = {
  */
 export function MessageButton({
   targetUserId,
-  targetName,
   label = 'Написать',
   variant = 'secondary',
   className = '',
@@ -42,14 +41,17 @@ export function MessageButton({
       promptGuest({ message: 'Чтобы написать сообщение, войдите в FilmVerse или создайте аккаунт.' });
       return;
     }
+
     setBusy(true);
     setError(null);
     const { roomId, error: err } = await openDirectChat(user.id, targetUserId);
     setBusy(false);
+
     if (err || !roomId) {
       setError(err || 'Не удалось открыть переписку.');
       return;
     }
+
     navigate(`/messages/${roomId}`);
   };
 
