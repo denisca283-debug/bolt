@@ -44,6 +44,36 @@ export type Skill = {
   name: string;
 };
 
+// Actor-specific extension of a profile. One row per user who marks
+// themselves as an actor; absence of a row means "not an actor".
+// Shared identity fields (full_name, city, bio, availability, photo_url)
+// are mirrored from `profiles` on save so the actor listing can read this
+// table alone — `profiles` stays the single place they are edited.
+export type ActorCategory = 'Актёр' | 'Актриса' | 'Массовка' | 'Студент' | 'Модель';
+
+export type Actor = {
+  id: string;
+  user_id: string | null;
+  full_name: string;
+  age: number | null;
+  gender: string | null;
+  city: string | null;
+  height: number | null;
+  category: string | null;
+  status: string | null;
+  hair_color: string | null;
+  eye_color: string | null;
+  skills: string[];
+  experience_years: number | null;
+  photo_url: string | null;
+  gallery: string[];
+  bio: string | null;
+  availability: string;
+  featured_score: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type UserSkill = {
   id: string;
   user_id: string;

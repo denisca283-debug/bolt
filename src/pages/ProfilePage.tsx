@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   MapPin, Calendar, Mail, Camera, Briefcase, Check, Loader2, Edit3, X,
-  AlertCircle,
+  AlertCircle, Clapperboard, Sparkles,
 } from 'lucide-react';
 import { Card, Badge, ShareButton, Avatar } from '../components/ui';
 import { Logo } from '../components/Logo';
@@ -9,7 +9,9 @@ import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from '../components/AuthModal';
 import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
-import type { Department, Profession, Profile } from '../types';
+import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
+import { SkillsPicker } from '../components/profile/SkillsPicker';
+import type { Actor, Department, Profession, Profile, Skill } from '../types';
 
 type PrimaryProfession = {
   user_profession_id: string;
@@ -17,12 +19,14 @@ type PrimaryProfession = {
   profession_name: string;
   department_id: string;
   department_name: string;
+  experience_years: number | null;
 };
 
 type UserProfessionRow = {
   id: string;
   profession_id: string;
   is_primary: boolean;
+  experience_years: number | null;
   profession: {
     id: string;
     name: string;
@@ -40,13 +44,55 @@ function extractPrimaryProfession(rows: UserProfessionRow[]): PrimaryProfession 
     profession_name: primary.profession.name,
     department_id: primary.profession.department_id,
     department_name: primary.profession.department?.name || '',
+    experience_years: primary.experience_years,
   };
+}
+
+// Module-level so `handleSave` can use it without depending on a const
+// declared further down the component body.
+const AVAILABILITY_LABELS: Record<string, string> = {
+  available: 'Свободен',
+  busy: 'Занят',
+  limited: 'Ограниченно',
+};
+
+const EMPTY_ACTOR_FIELDS: ActorFieldsValue = {
+  category: '',
+  age: '',
+  height: '',
+  hairColor: '',
+  eyeColor: '',
+  experienceYears: '',
+  gallery: [],
+};
+
+function actorRowToFields(row: Actor | null): ActorFieldsValue {
+  if (!row) return EMPTY_ACTOR_FIELDS;
+  return {
+    category: row.category || '',
+    age: row.age == null ? '' : String(row.age),
+    height: row.height == null ? '' : String(row.height),
+    hairColor: row.hair_color || '',
+    eyeColor: row.eye_color || '',
+    experienceYears: row.experience_years == null ? '' : String(row.experience_years),
+    gallery: row.gallery || [],
+  };
+}
+
+// Empty string means "not filled in", which must land in the database as
+// NULL rather than 0 — otherwise every blank field reads as a real zero.
+function toIntOrNull(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number.parseInt(t, 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 const USER_PROFESSIONS_SELECT = `
   id,
   profession_id,
   is_primary,
+  experience_years,
   profession:professions(
     id,
     name,
@@ -85,6 +131,11 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   const [allProfessions, setAllProfessions] = useState<Profession[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Actor extension + skills (both roles)
+  const [actorRow, setActorRow] = useState<Actor | null>(null);
+  const [allSkills, setAllSkills] = useState<Skill[]>([]);
+  const [skillIds, setSkillIds] = useState<string[]>([]);
+
   // Edit form state (owner only)
   const [editName, setEditName] = useState('');
   const [editCity, setEditCity] = useState('');
@@ -93,6 +144,14 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   const [editAvatarUrl, setEditAvatarUrl] = useState<string | null>(null);
   const [editDeptId, setEditDeptId] = useState<string>('');
   const [editProfId, setEditProfId] = useState<string>('');
+  // Which roles this person claims. Both may be true — a camera operator who
+  // also acts is one account, not two.
+  const [editIsActor, setEditIsActor] = useState(false);
+  const [editIsSpecialist, setEditIsSpecialist] = useState(false);
+  const [editActor, setEditActor] = useState<ActorFieldsValue>(EMPTY_ACTOR_FIELDS);
+  const [editSkillIds, setEditSkillIds] = useState<string[]>([]);
+  const [editProfExp, setEditProfExp] = useState('');
+  const [galleryUploading, setGalleryUploading] = useState(false);
 
   const displayProfile = isOwnProfile ? ownProfile : targetProfile;
 
@@ -114,17 +173,25 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
       }
       setNotFound(false);
 
-      const [deptRes, profRes, userProfRes] = await Promise.all([
+      const [deptRes, profRes, userProfRes, skillsRes, userSkillsRes, actorRes] = await Promise.all([
         supabase.from('departments').select('*').order('sort_order'),
         supabase.from('professions').select('*').order('sort_order'),
         supabase.from('user_professions').select(USER_PROFESSIONS_SELECT).eq('user_id', userId),
+        supabase.from('skills').select('*').order('name'),
+        supabase.from('user_skills').select('skill_id').eq('user_id', userId),
+        // No unique constraint on actors.user_id, so take the earliest row
+        // rather than maybeSingle(), which would error on an accidental duplicate.
+        supabase.from('actors').select('*').eq('user_id', userId).order('created_at').limit(1),
       ]);
 
       if (deptRes.data) setDepartments(deptRes.data as Department[]);
       if (profRes.data) setAllProfessions(profRes.data as Profession[]);
+      if (skillsRes.data) setAllSkills(skillsRes.data as Skill[]);
       setPrimaryProf(
         userProfRes.data ? extractPrimaryProfession(userProfRes.data as unknown as UserProfessionRow[]) : null
       );
+      setSkillIds(((userSkillsRes.data || []) as { skill_id: string }[]).map((r) => r.skill_id));
+      setActorRow(((actorRes.data || [])[0] as Actor | undefined) || null);
 
       setLoading(false);
       return;
@@ -148,14 +215,19 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     setNotFound(false);
     setTargetProfile(profileRow as Profile);
 
-    const { data: userProfData } = await supabase
-      .from('user_professions')
-      .select(USER_PROFESSIONS_SELECT)
-      .eq('user_id', profileRow.id);
+    const [userProfRes, skillsRes, userSkillsRes, actorRes] = await Promise.all([
+      supabase.from('user_professions').select(USER_PROFESSIONS_SELECT).eq('user_id', profileRow.id),
+      supabase.from('skills').select('*').order('name'),
+      supabase.from('user_skills').select('skill_id').eq('user_id', profileRow.id),
+      supabase.from('actors').select('*').eq('user_id', profileRow.id).order('created_at').limit(1),
+    ]);
 
     setPrimaryProf(
-      userProfData ? extractPrimaryProfession(userProfData as unknown as UserProfessionRow[]) : null
+      userProfRes.data ? extractPrimaryProfession(userProfRes.data as unknown as UserProfessionRow[]) : null
     );
+    if (skillsRes.data) setAllSkills(skillsRes.data as Skill[]);
+    setSkillIds(((userSkillsRes.data || []) as { skill_id: string }[]).map((r) => r.skill_id));
+    setActorRow(((actorRes.data || [])[0] as Actor | undefined) || null);
 
     setLoading(false);
   }, [slug, userId]);
@@ -186,11 +258,30 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     if (primaryProf) {
       setEditDeptId(primaryProf.department_id);
       setEditProfId(primaryProf.profession_id);
+      setEditProfExp(primaryProf.experience_years == null ? '' : String(primaryProf.experience_years));
+      setEditIsSpecialist(true);
     } else {
       setEditDeptId('');
       setEditProfId('');
+      setEditProfExp('');
+      setEditIsSpecialist(false);
     }
   }, [isOwnProfile, primaryProf, editing]);
+
+  // Seed the actor half of the form. Same rule as above: never while the
+  // form is open, or a background refresh wipes what is being typed.
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    if (editing) return;
+    setEditIsActor(!!actorRow);
+    setEditActor(actorRowToFields(actorRow));
+  }, [isOwnProfile, actorRow, editing]);
+
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    if (editing) return;
+    setEditSkillIds(skillIds);
+  }, [isOwnProfile, skillIds, editing]);
 
   const filteredProfessions = editDeptId
     ? allProfessions.filter((p) => p.department_id === editDeptId)
@@ -222,6 +313,34 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
       setSaveMsg({ type: 'error', text: 'Не удалось загрузить фото. Попробуйте ещё раз.' });
     }
     setSaving(false);
+  };
+
+  // Gallery photos live in the same `avatars` bucket: its policy only requires
+  // the first path segment to be the user's id, so no new bucket is needed.
+  const handleGalleryUpload = async (file: File) => {
+    if (!user) {
+      setSaveMsg({ type: 'error', text: 'Сессия истекла. Обновите страницу и войдите снова.' });
+      return;
+    }
+    setGalleryUploading(true);
+    setSaveMsg(null);
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${user.id}/gallery-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(path, file, { upsert: true });
+      if (uploadError) {
+        setSaveMsg({ type: 'error', text: 'Не удалось загрузить фото. Попробуйте ещё раз.' });
+        setGalleryUploading(false);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+      setEditActor((prev) => ({ ...prev, gallery: [...prev.gallery, urlData.publicUrl] }));
+    } catch {
+      setSaveMsg({ type: 'error', text: 'Не удалось загрузить фото. Попробуйте ещё раз.' });
+    }
+    setGalleryUploading(false);
   };
 
   const handleSave = async () => {
@@ -276,8 +395,8 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
         }
       }
 
-      // 2. Save primary profession if selected
-      if (editProfId) {
+      // 2. Primary profession + years of experience (industry specialists)
+      if (editIsSpecialist && editProfId) {
         const existing = primaryProf;
         const professionChanged = existing?.profession_id !== editProfId;
 
@@ -302,7 +421,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
             // Promote existing row to primary
             await supabase
               .from('user_professions')
-              .update({ is_primary: true })
+              .update({ is_primary: true, experience_years: toIntOrNull(editProfExp) })
               .eq('id', existingRow.id);
           } else {
             // Insert new primary profession
@@ -312,6 +431,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
                 user_id: user.id,
                 profession_id: editProfId,
                 is_primary: true,
+                experience_years: toIntOrNull(editProfExp),
               });
             if (insertError) {
               setSaveMsg({ type: 'error', text: 'Не удалось сохранить профессию. Попробуйте ещё раз.' });
@@ -319,7 +439,80 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
               return;
             }
           }
+        } else if (existing) {
+          // Same profession — only the years of experience can have changed.
+          await supabase
+            .from('user_professions')
+            .update({ experience_years: toIntOrNull(editProfExp) })
+            .eq('id', existing.user_profession_id);
         }
+      }
+
+      // 3. Skills — shared by both roles. `user_skills` has insert and delete
+      // policies but no update, so changes are applied as a diff.
+      const skillsToAdd = editSkillIds.filter((id) => !skillIds.includes(id));
+      const skillsToRemove = skillIds.filter((id) => !editSkillIds.includes(id));
+
+      if (skillsToRemove.length > 0) {
+        await supabase
+          .from('user_skills')
+          .delete()
+          .eq('user_id', user.id)
+          .in('skill_id', skillsToRemove);
+      }
+      if (skillsToAdd.length > 0) {
+        const { error: skillErr } = await supabase
+          .from('user_skills')
+          .insert(skillsToAdd.map((skill_id) => ({ user_id: user.id, skill_id })));
+        if (skillErr) {
+          setSaveMsg({ type: 'error', text: 'Не удалось сохранить навыки. Попробуйте ещё раз.' });
+          setSaving(false);
+          return;
+        }
+      }
+
+      // 4. Actor extension row. Shared identity fields are mirrored here so the
+      // actor listing can read this table alone, but they stay editable only
+      // on the profile above — one source of truth.
+      if (editIsActor) {
+        const actorPayload = {
+          user_id: user.id,
+          full_name: editName.trim() || 'Без имени',
+          city: editCity.trim() || null,
+          bio: editAbout.trim() || null,
+          photo_url: editAvatarUrl,
+          availability: AVAILABILITY_LABELS[editAvailability] || 'Свободен',
+          category: editActor.category || null,
+          age: toIntOrNull(editActor.age),
+          height: toIntOrNull(editActor.height),
+          hair_color: editActor.hairColor.trim() || null,
+          eye_color: editActor.eyeColor.trim() || null,
+          experience_years: toIntOrNull(editActor.experienceYears),
+          gallery: editActor.gallery,
+        };
+
+        if (actorRow) {
+          const { data: updatedActor, error: actorErr } = await supabase
+            .from('actors')
+            .update(actorPayload)
+            .eq('id', actorRow.id)
+            .select('id');
+          if (actorErr || !updatedActor || updatedActor.length === 0) {
+            setSaveMsg({ type: 'error', text: 'Не удалось сохранить анкету актёра. Попробуйте ещё раз.' });
+            setSaving(false);
+            return;
+          }
+        } else {
+          const { error: actorErr } = await supabase.from('actors').insert(actorPayload);
+          if (actorErr) {
+            setSaveMsg({ type: 'error', text: 'Не удалось создать анкету актёра. Попробуйте ещё раз.' });
+            setSaving(false);
+            return;
+          }
+        }
+      } else if (actorRow) {
+        // Unchecked "Я актёр" — remove the actor card entirely.
+        await supabase.from('actors').delete().eq('id', actorRow.id);
       }
 
       await refreshProfile();
@@ -356,22 +549,24 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
 
   const displayName = displayProfile?.full_name || (isOwnProfile ? user?.email : null) || 'Пользователь FilmVerse';
   const initials = displayName.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-  const availabilityLabels: Record<string, string> = {
-    available: 'Свободен',
-    busy: 'Занят',
-    limited: 'Ограниченно',
-  };
+  const availabilityLabels = AVAILABILITY_LABELS;
   const availabilityColors: Record<string, string> = {
     available: 'bg-emerald-200/30 text-emerald-600',
     busy: 'bg-danger-200/30 text-danger-700',
     limited: 'bg-warn-200/30 text-warn-700',
   };
 
-  // Missing profile basics (owner-only)
+  const selectedSkillNames = allSkills
+    .filter((s) => skillIds.includes(s.id))
+    .map((s) => s.name);
+
+  // Missing profile basics (owner-only). What counts as missing depends on the
+  // role: an actor is not nagged for a department, a gaffer not for a headshot.
   const missing: string[] = [];
   if (!displayProfile?.avatar_url) missing.push('фото');
   if (!displayProfile?.city) missing.push('город');
-  if (!primaryProf) missing.push('основная профессия');
+  if (!actorRow && !primaryProf) missing.push('кто вы — актёр или специалист');
+  if (actorRow && (actorRow.gallery || []).length === 0) missing.push('фотографии для кастинга');
   if (!displayProfile?.about) missing.push('о себе');
   const profileIncomplete = missing.length > 0;
 
@@ -448,36 +643,139 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
             </p>
           </div>
 
-          {/* Department + Profession */}
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-txt-secondary mb-1.5">Департамент</label>
-              <select
-                value={editDeptId}
-                onChange={(e) => { setEditDeptId(e.target.value); setEditProfId(''); }}
-                className="input-field"
+          {/* Which roles this person claims */}
+          <div>
+            <label className="block text-xs font-medium text-txt-secondary mb-1.5">Кто вы в индустрии</label>
+            <p className="text-xs text-txt-muted mb-3">
+              Можно отметить оба — если вы и снимаетесь, и работаете в команде.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setEditIsActor((v) => !v)}
+                className={`text-left p-4 rounded-lg border transition-all duration-200 ${
+                  editIsActor
+                    ? 'bg-emerald-200/25 border-emerald-400'
+                    : 'bg-surface-600 border-line-soft hover:border-line'
+                }`}
               >
-                <option value="">Выберите департамент</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-txt-secondary mb-1.5">Основная профессия</label>
-              <select
-                value={editProfId}
-                onChange={(e) => setEditProfId(e.target.value)}
-                className="input-field"
-                disabled={!editDeptId}
+                <div className="flex items-center gap-2 mb-1">
+                  <Clapperboard className={`h-4 w-4 ${editIsActor ? 'text-emerald-600' : 'text-txt-muted'}`} />
+                  <span className={`text-sm font-medium ${editIsActor ? 'text-emerald-600' : 'text-txt-primary'}`}>
+                    Я актёр
+                  </span>
+                  {editIsActor && <Check className="h-3.5 w-3.5 text-emerald-600 ml-auto" />}
+                </div>
+                <p className="text-xs text-txt-muted">Рост, возраст, внешность, фотографии</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setEditIsSpecialist((v) => !v)}
+                className={`text-left p-4 rounded-lg border transition-all duration-200 ${
+                  editIsSpecialist
+                    ? 'bg-emerald-200/25 border-emerald-400'
+                    : 'bg-surface-600 border-line-soft hover:border-line'
+                }`}
               >
-                <option value="">Выберите профессию</option>
-                {filteredProfessions.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+                <div className="flex items-center gap-2 mb-1">
+                  <Briefcase className={`h-4 w-4 ${editIsSpecialist ? 'text-emerald-600' : 'text-txt-muted'}`} />
+                  <span className={`text-sm font-medium ${editIsSpecialist ? 'text-emerald-600' : 'text-txt-primary'}`}>
+                    Я специалист индустрии
+                  </span>
+                  {editIsSpecialist && <Check className="h-3.5 w-3.5 text-emerald-600 ml-auto" />}
+                </div>
+                <p className="text-xs text-txt-muted">Департамент, профессия, опыт</p>
+              </button>
             </div>
+
+            {actorRow && !editIsActor && (
+              <div className="mt-3 p-3 rounded-lg bg-warn-200/25 border border-warn-600/30 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-warn-700 shrink-0 mt-0.5" />
+                <p className="text-xs text-warn-700 leading-relaxed">
+                  При сохранении анкета актёра будет удалена: рост, возраст, внешность и фотографии
+                  пропадут. Их можно будет заполнить заново.
+                </p>
+              </div>
+            )}
           </div>
+
+          {/* Specialist block */}
+          {editIsSpecialist && (
+            <div className="space-y-4 p-4 rounded-lg bg-surface-700/60 border border-line-soft">
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4 text-emerald-500" />
+                <h3 className="text-sm font-semibold text-txt-primary">Специалист индустрии</h3>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-txt-secondary mb-1.5">Департамент</label>
+                <select
+                  value={editDeptId}
+                  onChange={(e) => { setEditDeptId(e.target.value); setEditProfId(''); }}
+                  className="input-field"
+                >
+                  <option value="">Выберите департамент</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-txt-secondary mb-1.5">Основная профессия</label>
+                <select
+                  value={editProfId}
+                  onChange={(e) => setEditProfId(e.target.value)}
+                  className="input-field"
+                  disabled={!editDeptId}
+                >
+                  <option value="">Выберите профессию</option>
+                  {filteredProfessions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-txt-secondary mb-1.5">
+                  Опыт в профессии, лет
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={80}
+                  inputMode="numeric"
+                  value={editProfExp}
+                  onChange={(e) => setEditProfExp(e.target.value)}
+                  placeholder="например, 7"
+                  className="input-field"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Actor block */}
+          {editIsActor && (
+            <div className="space-y-5 p-4 rounded-lg bg-surface-700/60 border border-line-soft">
+              <div className="flex items-center gap-2">
+                <Clapperboard className="h-4 w-4 text-emerald-500" />
+                <h3 className="text-sm font-semibold text-txt-primary">Анкета актёра</h3>
+              </div>
+              <ActorFields
+                value={editActor}
+                onChange={(patch) => setEditActor((prev) => ({ ...prev, ...patch }))}
+                onUploadPhoto={handleGalleryUpload}
+                uploading={galleryUploading}
+              />
+            </div>
+          )}
+
+          {/* Skills — relevant to both roles */}
+          {(editIsActor || editIsSpecialist) && allSkills.length > 0 && (
+            <SkillsPicker
+              skills={allSkills}
+              selectedIds={editSkillIds}
+              onChange={setEditSkillIds}
+            />
+          )}
 
           {/* Availability */}
           <div>
@@ -597,26 +895,97 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
         </Card>
       )}
 
-      {/* Primary profession */}
-      <Card className="p-6 mt-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Briefcase className="h-4 w-4 text-emerald-500" />
-          <h2 className="text-sm font-semibold text-txt-primary">Основная профессия</h2>
-        </div>
-        {primaryProf ? (
-          <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-200/20 border border-emerald-300/20">
-            <div>
-              <p className="text-sm font-medium text-txt-primary">{primaryProf.profession_name}</p>
-              <p className="text-xs text-txt-muted mt-0.5">{primaryProf.department_name}</p>
-            </div>
-            <Badge variant="fern">Основная</Badge>
+      {/* Actor card — only for people who marked themselves as actors */}
+      {actorRow && (
+        <Card className="p-6 mt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Clapperboard className="h-4 w-4 text-emerald-500" />
+            <h2 className="text-sm font-semibold text-txt-primary">Анкета актёра</h2>
+            {actorRow.category && <Badge variant="fern">{actorRow.category}</Badge>}
           </div>
-        ) : (
-          <p className="text-sm text-txt-muted">
-            {isOwnProfile ? 'Добавьте основную профессию' : 'Профессия не указана'}
-          </p>
-        )}
-      </Card>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
+            {[
+              ['Возраст', actorRow.age == null ? null : `${actorRow.age}`],
+              ['Рост', actorRow.height == null ? null : `${actorRow.height} см`],
+              ['Волосы', actorRow.hair_color],
+              ['Глаза', actorRow.eye_color],
+              ['Опыт съёмок', actorRow.experience_years == null ? null : `${actorRow.experience_years} л.`],
+            ]
+              .filter(([, v]) => !!v)
+              .map(([label, value]) => (
+                <div key={label as string}>
+                  <p className="text-[11px] uppercase tracking-wider text-txt-muted">{label}</p>
+                  <p className="text-sm text-txt-primary mt-0.5">{value}</p>
+                </div>
+              ))}
+          </div>
+
+          {(actorRow.gallery || []).length > 0 && (
+            <div className="mt-5 grid grid-cols-3 sm:grid-cols-4 gap-3">
+              {actorRow.gallery.map((url) => (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="aspect-[3/4] rounded-lg overflow-hidden border border-line-soft block"
+                >
+                  <img src={url} alt="" className="h-full w-full object-cover" />
+                </a>
+              ))}
+            </div>
+          )}
+
+          {actorRow.age == null && actorRow.height == null && (actorRow.gallery || []).length === 0 && (
+            <p className="text-sm text-txt-muted">
+              {isOwnProfile ? 'Заполните данные — по ним вас находят на кастинг.' : 'Данные не указаны'}
+            </p>
+          )}
+        </Card>
+      )}
+
+      {/* Primary profession — shown for specialists, and as a prompt on an
+          otherwise empty own profile */}
+      {(primaryProf || (isOwnProfile && !actorRow)) && (
+        <Card className="p-6 mt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Briefcase className="h-4 w-4 text-emerald-500" />
+            <h2 className="text-sm font-semibold text-txt-primary">Основная профессия</h2>
+          </div>
+          {primaryProf ? (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-200/20 border border-emerald-300/20">
+              <div>
+                <p className="text-sm font-medium text-txt-primary">{primaryProf.profession_name}</p>
+                <p className="text-xs text-txt-muted mt-0.5">
+                  {primaryProf.department_name}
+                  {primaryProf.experience_years != null && ` · опыт ${primaryProf.experience_years} л.`}
+                </p>
+              </div>
+              <Badge variant="fern">Основная</Badge>
+            </div>
+          ) : (
+            <p className="text-sm text-txt-muted">
+              {isOwnProfile ? 'Добавьте основную профессию' : 'Профессия не указана'}
+            </p>
+          )}
+        </Card>
+      )}
+
+      {/* Skills */}
+      {selectedSkillNames.length > 0 && (
+        <Card className="p-6 mt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles className="h-4 w-4 text-emerald-500" />
+            <h2 className="text-sm font-semibold text-txt-primary">Навыки</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {selectedSkillNames.map((name) => (
+              <span key={name} className="chip bg-surface-600 text-txt-secondary">{name}</span>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* About */}
       {displayProfile?.about && (
