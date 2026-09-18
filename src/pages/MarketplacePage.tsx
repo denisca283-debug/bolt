@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search, Plus, Loader2, SlidersHorizontal, ShoppingBag } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useOrganization } from '../hooks/useOrganization';
+import { useCompanyCards } from '../hooks/useCompanyCards';
 import { useAuthModal } from '../components/AuthModal';
 import { useRouter } from '../router';
 import { MarketplaceCard } from '../components/MarketplaceCard';
@@ -19,11 +21,13 @@ const SORTS = [
 type SortKey = (typeof SORTS)[number]['key'];
 
 export function MarketplacePage() {
+  const organization = useOrganization();
   const { user } = useAuth();
   const { promptGuest } = useAuthModal();
   const { navigate } = useRouter();
 
   const [listings, setListings] = useState<MarketplaceListing[]>([]);
+  const { companies } = useCompanyCards(listings);
   const [loading, setLoading] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -37,7 +41,7 @@ export function MarketplacePage() {
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
-      .from('marketplace_listings')
+      .from('marketplace_listings_discovery')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(300);
@@ -65,7 +69,7 @@ export function MarketplacePage() {
       if (mode !== 'Все' && l.mode !== mode) return false;
       if (category !== 'Все' && l.category !== category) return false;
       if (city !== 'Все' && l.city !== city) return false;
-      if (onlyMine && l.user_id !== user?.id) return false;
+      if (onlyMine && (organization.selected ? l.organization_id !== organization.selected.id : !!l.organization_id || l.user_id !== user?.id)) return false;
       if (q) {
         const hay = `${l.title} ${l.description || ''} ${l.category || ''} ${l.city || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -78,7 +82,7 @@ export function MarketplacePage() {
       if (sort === 'old') return a.created_at.localeCompare(b.created_at);
       return b.created_at.localeCompare(a.created_at);
     });
-  }, [listings, query, mode, category, city, sort, onlyMine, user?.id]);
+  }, [listings, query, mode, category, city, sort, onlyMine, user?.id, organization.selected]);
 
   const openCreate = () => {
     if (!user) {
@@ -176,7 +180,7 @@ export function MarketplacePage() {
                 : 'bg-surface-700 text-txt-secondary border-line-soft hover:border-line'
             }`}
           >
-            Мои объявления
+            {organization.selected ? 'Объявления компании' : 'Мои личные объявления'}
           </button>
         )}
         {filtersActive && (
@@ -225,7 +229,7 @@ export function MarketplacePage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
           {visible.map((l) => (
-            <MarketplaceCard key={l.id} listing={l} />
+            <MarketplaceCard key={l.id} listing={l} companyName={l.organization_id ? companies.get(l.organization_id)?.name : undefined} />
           ))}
         </div>
       )}

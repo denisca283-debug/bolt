@@ -19,7 +19,7 @@ function daysAgo(iso: string) {
   return `${d} дн. назад`;
 }
 
-export function MarketplaceCard({ listing }: { listing: MarketplaceListing }) {
+export function MarketplaceCard({ listing, companyName }: { listing: MarketplaceListing; companyName?: string }) {
   const { navigate } = useRouter();
 
   return (
@@ -47,6 +47,7 @@ export function MarketplaceCard({ listing }: { listing: MarketplaceListing }) {
 
       <div className="p-4 flex-1 flex flex-col">
         {listing.category && <p className="text-xs text-txt-muted mb-1">{listing.category}</p>}
+        {listing.organization_id && <p className="text-xs text-emerald-500 mb-2">{companyName || 'Компания'}</p>}
         <h3 className="text-sm font-semibold text-txt-primary leading-snug group-hover:text-emerald-600 transition-colors line-clamp-2">
           {listing.title}
         </h3>

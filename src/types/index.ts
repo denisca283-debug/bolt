@@ -1,4 +1,5 @@
 export type Profile = {
+  search_engine_indexable?: boolean;
   id: string;
   full_name: string | null;
   public_slug: string | null;
@@ -72,6 +73,11 @@ export type UserProfession = {
 export type Skill = {
   id: string;
   name: string;
+  scope?: 'actor' | 'professional' | 'both';
+  department_id?: string | null;
+  category?: string;
+  sort_order?: number;
+  is_active?: boolean;
 };
 
 // Actor-specific extension of a profile. One row per user who marks
@@ -123,6 +129,7 @@ export type Actor = {
 export type MarketplaceListing = {
   id: string;
   user_id: string;
+  organization_id?: string | null;
   title: string;
   mode: string;
   category: string | null;
@@ -135,6 +142,7 @@ export type MarketplaceListing = {
 
 export type WorkOpportunity = {
   id: string;
+  organization_id?: string | null;
   user_id: string;
   title: string;
   type: string;
@@ -156,6 +164,7 @@ export type WorkOpportunity = {
 };
 
 export type ProjectRow = {
+  organization_id?: string | null;
   id: string;
   user_id: string;
   title: string;

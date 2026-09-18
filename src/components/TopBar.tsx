@@ -4,6 +4,7 @@ import { Avatar, IconButton } from './ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from './AuthModal';
 import { PublishMenu } from './create/PublishMenu';
+import { useOrganization } from '../hooks/useOrganization';
 
 type TopBarProps = {
   onMenuClick: () => void;
@@ -12,6 +13,7 @@ type TopBarProps = {
 const SECTIONS_WITH_OWN_PUBLISH = ['/marketplace', '/work', '/projects'];
 
 export function TopBar({ onMenuClick }: TopBarProps) {
+  const organization = useOrganization();
   const { navigate, path } = useRouter();
   const ownPublishHere = SECTIONS_WITH_OWN_PUBLISH.some((p) => path === p || path.startsWith(`${p}/`));
   const { profile, user, isAuthenticated } = useAuth();
@@ -26,12 +28,12 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 flex items-center gap-3 h-16 px-4 lg:px-6 bg-base-900/90 backdrop-blur-xl border-b border-line-soft">
+    <header className="sticky top-0 z-30 flex items-center gap-2 sm:gap-3 h-16 px-3 sm:px-4 lg:px-6 bg-base-900/90 backdrop-blur-xl border-b border-line-soft">
       <IconButton label="Меню" onClick={onMenuClick} className="lg:hidden">
         <Menu className="h-5 w-5" />
       </IconButton>
 
-      <div className="relative flex-1 max-w-md">
+      <div className="relative hidden sm:block flex-1 min-w-0 max-w-md">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-txt-muted" />
         <input
           type="text"
@@ -44,6 +46,12 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
       {isAuthenticated ? (
         <>
+          <select aria-label="Рабочий контекст" className="input-field !w-auto max-w-24 sm:max-w-36 text-xs" value={organization.selected?.id || ''} disabled={organization.loading}
+            onChange={e => { if (e.target.value === 'manage') navigate('/organizations'); else organization.select(e.target.value); }}>
+            <option value="">Личный профиль</option>
+            {organization.organizations.map(o => <option key={o.id} value={o.id}>Компания: {o.name}</option>)}
+            <option value="manage">Мои компании…</option>
+          </select>
           {!ownPublishHere && (
             <PublishMenu
               onCreated={(kind, id) => {

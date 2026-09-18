@@ -1,12 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { RouterProvider, useRouter, getActorIdFromPath, getRouteParam } from './router';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { OrganizationProvider } from './hooks/useOrganization';
 import { AuthModalProvider, useAuthModal } from './components/AuthModal';
 import { AppShell } from './components/AppShell';
 import { HomePage } from './pages/HomePage';
 import { ActorsPage } from './pages/ActorsPage';
 import { ActorProfilePage } from './pages/ActorProfilePage';
 import { WorkPage } from './pages/WorkPage';
+import { ResumesPage, PublicResumePage } from './pages/ResumesPage';
+import { OrganizationsPage } from './pages/OrganizationsPage';
+import { CompaniesPage, CompanyPage } from './pages/CompaniesPage';
+import { ProjectPage } from './pages/ProjectPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { MessagesPage } from './pages/MessagesPage';
 import { MarketplacePage } from './pages/MarketplacePage';
@@ -54,6 +59,16 @@ function PageRouter() {
   if (actorId) return <ActorProfilePage actorId={actorId} />;
 
   const publicSlug = getRouteParam(path, '/u');
+  const sharedResume = path.match(/^\/resume-share\/([^/]+)\/([a-f0-9]{64})$/);
+  if (sharedResume) return <PublicResumePage key={path} id={sharedResume[1]} token={sharedResume[2]} />;
+  const projectId = getRouteParam(path, '/project');
+  if (projectId) return <ProjectPage key={projectId} id={projectId} />;
+  const workId = getRouteParam(path, '/work');
+  if (workId) return <WorkPage key={workId} id={workId} />;
+  const resumeId = getRouteParam(path, '/resume');
+  if (resumeId) return <PublicResumePage key={resumeId} id={resumeId} />;
+  const companySlug = getRouteParam(path, '/company');
+  if (companySlug) return <CompanyPage key={companySlug} slug={companySlug} />;
   if (publicSlug) return <ProfilePage slug={publicSlug} />;
 
   const listingId = getRouteParam(path, '/listing');
@@ -73,6 +88,14 @@ function PageRouter() {
       return <ProfessionalsPage />;
     case '/work':
       return <WorkPage />;
+    case '/resumes':
+      return <ResumesPage key="resumes" />;
+    case '/organizations':
+      return <OrganizationsPage />;
+    case '/companies':
+      return <CompaniesPage />;
+    case '/resumes/new':
+      return <ResumesPage key="new-resume" create />;
     case '/projects':
       return <ProjectsPage />;
     case '/messages':
@@ -141,7 +164,7 @@ function DeploymentConfigError() {
 }
 
 function AppContent() {
-  const { authLoading, isAuthenticated, supabaseReady } = useAuth();
+  const { authLoading, isAuthenticated, supabaseReady, user } = useAuth();
   const { path } = useRouter();
 
   if (!supabaseReady) return <DeploymentConfigError />;
@@ -174,7 +197,7 @@ function AppContent() {
     <>
       <PrivateRouteGuard />
       <AppShell>
-        <PageRouter />
+        <PageRouter key={user?.id || 'guest'} />
       </AppShell>
     </>
   );
@@ -185,7 +208,7 @@ function App() {
     <RouterProvider>
       <AuthProvider>
         <AuthModalProvider>
-          <AppContent />
+          <OrganizationProvider><AppContent /></OrganizationProvider>
         </AuthModalProvider>
       </AuthProvider>
     </RouterProvider>

@@ -3,8 +3,13 @@ import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { VerificationPanel } from '../components/VerificationPanel';
 import { useEntitlements } from '../hooks/useEntitlements';
+import { PrivacySettings } from '../components/PrivacySettings';
+import { ProfileContacts } from '../components/profile/ProfileContacts';
+import { ProfileMedia } from '../components/profile/ProfileMedia';
+import { useRouter } from '../router';
 
 export function SettingsPage() {
+  const { navigate } = useRouter();
   const { user, profile, signOut } = useAuth();
   const [copied, setCopied] = useState(false);
 
@@ -33,7 +38,11 @@ export function SettingsPage() {
 
       <div className="space-y-4">
         {/* Verification — the real trust layer */}
-        <VerificationPanel />
+      {user && <PrivacySettings key={user.id} userId={user.id} />}
+      {user && <ProfileContacts key={`contacts-${user.id}`} userId={user.id} editable />}
+      {user && <ProfileMedia key={`media-${user.id}`} userId={user.id} editable />}
+      <div className="surface p-5 flex flex-wrap gap-3"><button className="btn-secondary" onClick={() => navigate('/resumes')}>Мои резюме</button><button className="btn-secondary" onClick={() => navigate('/organizations')}>Мои компании</button><button className="btn-secondary" onClick={() => navigate('/forgot-password')}>Сбросить пароль</button></div>
+      <VerificationPanel />
 
         {/* Account */}
         <div className="surface p-6 space-y-4">
@@ -69,7 +78,7 @@ export function SettingsPage() {
               <p className="text-sm text-txt-primary truncate">
                 {publicUrl ? publicUrl.replace(`${window.location.origin}/#`, '') : 'Ссылка появится после заполнения профиля'}
               </p>
-              <p className="text-xs text-txt-muted mt-0.5">Публичная ссылка на профиль — открывается без регистрации</p>
+              <p className="text-xs text-txt-muted mt-0.5">Доступ по ссылке зависит от настроек видимости</p>
             </div>
             {publicUrl && (
               <button onClick={copyLink} className="btn-secondary shrink-0 !py-2 !px-3 text-xs">

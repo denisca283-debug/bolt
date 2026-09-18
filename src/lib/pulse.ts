@@ -21,6 +21,7 @@ function initialsOf(name: string) {
  * pulse entry must never make the user think their listing was not published.
  */
 export async function addPulse(params: {
+  userId: string;
   kind: PulseKind;
   person: string;
   action: string;
@@ -29,6 +30,7 @@ export async function addPulse(params: {
 }): Promise<void> {
   try {
     await supabase.from('pulse_feed').insert({
+      user_id: params.userId,
       kind: params.kind,
       person: params.person,
       initials: initialsOf(params.person || 'FV'),

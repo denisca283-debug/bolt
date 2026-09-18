@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { MapPin, Calendar, Loader2, ArrowLeft, Trash2, ImageOff, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useOrganization } from '../hooks/useOrganization';
 import { useRouter } from '../router';
 import { Avatar, ShareButton } from '../components/ui';
 import { MessageButton } from '../components/MessageButton';
@@ -15,6 +16,8 @@ const MODE_STYLES: Record<string, string> = {
 
 export function ListingPage({ listingId }: { listingId: string }) {
   const { user } = useAuth();
+  const organization = useOrganization();
+  const [company, setCompany] = useState<{ name: string; slug: string } | null>(null);
   const { navigate } = useRouter();
 
   const [listing, setListing] = useState<MarketplaceListing | null>(null);
@@ -39,6 +42,13 @@ export function ListingPage({ listingId }: { listingId: string }) {
 
     const row = data as MarketplaceListing;
     setListing(row);
+    setCompany(null); setAuthor(null);
+    if (row.organization_id) {
+      const result = await supabase.rpc('company_cards', { p_ids: [row.organization_id] });
+      setCompany(result.data?.[0] || null);
+      setLoading(false);
+      return;
+    }
 
     const { data: profileRow } = await supabase
       .from('profiles')
@@ -114,7 +124,7 @@ export function ListingPage({ listingId }: { listingId: string }) {
     );
   }
 
-  const isMine = user?.id === listing.user_id;
+  const isMine = listing.organization_id ? organization.can('manage_marketplace', listing.organization_id) : user?.id === listing.user_id;
 
   return (
     <div className="animate-fade-in max-w-5xl">
@@ -180,6 +190,7 @@ export function ListingPage({ listingId }: { listingId: string }) {
           </div>
 
           {/* Seller */}
+          {listing.organization_id && <div className="surface p-5"><p className="text-xs text-txt-muted">Компания — владелец предложения</p>{company ? <button className="text-lg text-emerald-500 mt-2" onClick={() => navigate('/company/' + company.slug)}>{company.name}</button> : <p>Информация о компании недоступна.</p>}</div>}
           {author && (
             <div className="surface p-5">
               <p className="text-xs font-semibold uppercase tracking-wider text-txt-muted mb-3">

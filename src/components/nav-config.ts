@@ -22,6 +22,7 @@ export const navItems: NavItem[] = [
   { path: '/pulse', label: 'Пульс индустрии', icon: Activity },
   { path: '/actors', label: 'Актёры', icon: Users },
   { path: '/professionals', label: 'Специалисты', icon: Clapperboard },
+  { path: '/companies', label: 'Компании', icon: Briefcase },
   { path: '/work', label: 'Работа', icon: Briefcase, badge: 10 },
   { path: '/projects', label: 'Проекты', icon: Clapperboard },
   { path: '/messages', label: 'Сообщения', icon: MessageSquare, badge: 3, requiresAuth: true },
@@ -36,4 +37,6 @@ export const PRIVATE_ROUTES = new Set<string>([
   '/settings',
   '/profile',
   '/onboarding',
+  '/resumes',
+  '/organizations',
 ]);

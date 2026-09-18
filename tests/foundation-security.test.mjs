@@ -16,7 +16,7 @@ test('final foundation: chronological replay, private authority and adversarial 
  try {
   await db.exec(`
     CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
-    CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);
+    CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz);
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     CREATE SCHEMA storage; CREATE TABLE storage.buckets(id text PRIMARY KEY,name text,public boolean);
     CREATE TABLE storage.objects(id uuid PRIMARY KEY,name text,bucket_id text);
@@ -28,7 +28,7 @@ test('final foundation: chronological replay, private authority and adversarial 
   const files=(await readdir(directory)).filter(f=>f.endsWith('.sql')).sort();
   for(const file of files){
     if(file.endsWith('_foundation_privacy_entitlements.sql')){
-      await q('INSERT INTO auth.users VALUES($1),($2)',[a,b]);
+      await q('INSERT INTO auth.users(id) VALUES($1),($2)',[a,b]);
       await q("INSERT INTO profiles(id,full_name,public_slug,plan,date_of_birth) VALUES($1,'A','alice','pro','1990-01-01'),($2,'B','bob','free',NULL)",[a,b]);
       await q("INSERT INTO user_permissions(user_id,permission_id) SELECT $1,id FROM permissions WHERE name='create_professional_discussion'",[b]);
     }

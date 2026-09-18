@@ -41,19 +41,20 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
 
   const pickResume = () => {
     setPickerOpen(false);
-    navigate('/profile');
+    navigate('/resumes/new');
   };
 
   return (
     <div className="relative">
       <button
         onClick={handleTrigger}
+        aria-label="Разместить"
         aria-haspopup="dialog"
         aria-expanded={pickerOpen}
-        className={`btn-primary ${compact ? '!px-2.5' : ''}`}
+        className={`btn-primary ${compact ? '!px-2.5' : '!px-2.5 sm:!px-4'}`}
       >
         <Plus className="h-4 w-4" />
-        {!compact && <span>Разместить</span>}
+        {!compact && <span className="hidden sm:inline">Разместить</span>}
       </button>
 
       {pickerOpen && (

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchIndexing } from '../hooks/useSearchIndexing';
 import {
   MapPin, Calendar, Mail, Camera, Briefcase, Check, Loader2, Edit3, X,
   AlertCircle, Clapperboard, Sparkles,
@@ -9,9 +10,11 @@ import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from '../components/AuthModal';
 import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
-import { PROFILE_FIELDS } from '../lib/profile-fields';
 import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
 import { SkillsPicker } from '../components/profile/SkillsPicker';
+import { AdditionalSkills } from '../components/profile/AdditionalSkills';
+import { ProfileContacts } from '../components/profile/ProfileContacts';
+import { ProfileMedia } from '../components/profile/ProfileMedia';
 import { MessageButton } from '../components/MessageButton';
 import type { Actor, Department, Profession, Profile, Skill } from '../types';
 
@@ -158,6 +161,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   const [galleryUploading, setGalleryUploading] = useState(false);
 
   const displayProfile = isOwnProfile ? ownProfile : targetProfile;
+  useSearchIndexing(!isOwnProfile && !!targetProfile?.search_engine_indexable);
 
   // Key the loader on the user ID (a string), never on the `user` object.
   // Supabase hands out a new user object on every auth event (tab focus,
@@ -202,11 +206,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     }
 
     // Public profile lookup by slug — must work for guests too.
-    const { data: profileRow, error: profileErr } = await supabase
-      .from('profiles')
-      .select(PROFILE_FIELDS)
-      .eq('public_slug', slug)
-      .maybeSingle();
+    const { data: profileRow, error: profileErr } = await supabase.rpc('person_public', { p_slug: slug });
 
     if (profileErr || !profileRow) {
       setNotFound(true);
@@ -562,7 +562,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   };
 
   const selectedSkillNames = allSkills
-    .filter((s) => skillIds.includes(s.id))
+    .filter((s) => s.is_active !== false && skillIds.includes(s.id))
     .map((s) => s.name);
 
   // Missing profile basics (owner-only). What counts as missing depends on the
@@ -777,6 +777,8 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
           {(editIsActor || editIsSpecialist) && allSkills.length > 0 && (
             <SkillsPicker
               skills={allSkills}
+              actor={editIsActor}
+              departmentId={editDeptId}
               selectedIds={editSkillIds}
               onChange={setEditSkillIds}
             />
@@ -987,6 +989,9 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
       )}
 
       {/* Skills */}
+      {displayProfile?.id && <AdditionalSkills userId={displayProfile.id} editable={isOwnProfile} />}
+      {displayProfile?.id && <ProfileContacts userId={displayProfile.id} />}
+      {displayProfile?.id && <ProfileMedia userId={displayProfile.id} />}
       {selectedSkillNames.length > 0 && (
         <Card className="p-6 mt-6">
           <div className="flex items-center gap-2 mb-4">

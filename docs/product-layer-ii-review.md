@@ -1,0 +1,108 @@
+# Product layer II — architectural review handoff
+
+Status: review candidate, **not production-ready and not a claim that every product surface is complete**.
+Correction stage: see the explicit implementation boundary below. The original
+36-point inventory describes the initial candidate; corrections here supersede
+its Resume audience, invitation UI and skill-scope descriptions.
+Reviewed base: `950dca2759ae283d6bb8c2e3d5590ce9ba445d4d`.
+No production SQL writes, migrations, seeds, merge or production deployment were performed.
+The existing foundation PR #3 is not expanded. Review this as a stacked change.
+
+## Required 36-point report
+
+1. **Branch/head.** `epic/identity-organizations-resume`. The PR head is the authoritative GitHub SHA; local phase commits are preserved when connector-created commits have different metadata. Compare tree hashes, not just commit messages.
+2. **Migrations.** Seven new files: `20260918223148_organization_identity_authority`, `20260918223738_organization_business_ownership`, `20260918224444_person_privacy_work_context`, `20260918225413_resume_publication_entitlements`, `20260918230132_scoped_skills_and_experience`, `20260918230828_company_public_team_projection`, `20260918234520_identity_review_guards`. Previously applied migrations are unchanged.
+3. **Organization schema.** Existing organizations and membership IDs remain; organization is not an Auth account. Creator becomes nullable provenance, not permanent authority. A creator's account deletion cannot cascade-delete company content. Legacy creator ownership is materialized into membership once; duplicate memberships/ownerless historical records stop migration for review rather than being deleted.
+4. **Types.** Production, rental, agency, casting agency, studio, post-production, service company, education, other. Unknown historical type keys are retained. Description/specialties remain free-form.
+5. **Public company profile.** `/company/:slug`, safe explicit projection, approved-only verification badge, description/geography/specialties, optional cover/website, projects/work/listings, opt-in public team. Rental emphasizes offers. Direct unlisted access is distinct from directory discovery. Dedicated portfolio credits, rich agency cases, logo/social-link editing and broader type-specific layouts remain extensions, not completed screens.
+6. **Workspace.** `/organizations`, real company creation and membership, personal/company context switch without logging out, company profile/privacy editor, role/invite management, company publication entry points, private briefs, inventory and package composition. Only functional actions are shown. No fabricated dashboard counts, inbox, advertising or analytics panels. The context author is captured when a publication dialog opens, preventing a mid-draft switch from silently changing ownership.
+7. **Roles/permissions.** Owner, admin, producer, hiring manager, casting manager, rental manager, marketing, finance, member; immutable role-to-permission catalogue. Only owner controls owner/admin/finance grants. Last active owner cannot leave, be removed or delete their account until ownership is transferred. Browser permissions are affordances; RLS/RPC remains authority.
+8. **Invites.** Atomic issue/accept/decline/revoke; bounded lifetime; confirmed current `auth.users.email` match inside a private definer function, never browser access or user_metadata. No public email-existence endpoint or public tokens. Same-address re-acceptance is idempotent. No email-provider/send claim; invite is visible in the signed-in company area. Automatic expiry is evaluated on reply; a scheduled cleanup/display job is not installed.
+9. **Company ownership.** Optional `organization_id` on canonical existing content; `user_id` remains compatibility provenance and personal owner only when org is null; `created_by_user_id` is generated from it. Company authority is checked by active membership and specific permission, not creator identity. Ownership cannot be reassigned by client UPDATE.
+10. **Existing ownership migration.** Existing projects/work/listings stay personal with identical IDs. Company rows survive original employee departure/deletion. Personal content deletion/account erasure requires an explicit reviewed lifecycle; the new FK/check combination intentionally prevents accidental orphaning instead of silently deleting data.
+11. **Project relationships.** `project_organizations` supports client/agency/production/co-producer/casting/rental/post/vendor/distributor/other, multiple distinct relationships, pending/accepted/declined/ended. Private by default. Client can propose pending relationships only with project authority. Bilateral acceptance and credit publication UI remain future reviewed workflows.
+12. **Agency briefs.** `organization_briefs` has status, geography/dates, visibility and separate confidential budget. Workspace creates persisted private briefs; database permissions keep budgets private. No proposal, tender, award or payment workflow is claimed.
+13. **Inventory.** Canonical organization inventory, category/brand/model/custom name, quantity/condition/city, bounded JSON attributes, private replacement value. Workspace supports private creation and paginated viewing. Rich inventory editing/import/photos, stock reservation and availability calendars are not implemented.
+14. **Packages.** Packages reference existing inventory with required/optional quantity. Composite foreign keys prevent cross-company inventory composition. Workspace creates packages and adds positions; details load on demand, not for every package. Package is a valid empty draft-like object until positions are added; no stock reservation is implied.
+15. **Marketplace.** Inventory/package can prefill an ordinary company-owned listing. Inventory and public offering remain separate. Listing detail identifies company as seller and links its public page; it does not present employee DM as company inbox. Marketplace cards, work cards/details and project cards resolve company identity through bounded batched safe projections. Personal listing filters exclude company-owned rows; selected-company filters target that company. Work deletion affordances check company permission rather than creator identity. Complete organization-aware editing across all existing screens remains follow-up work.
+16. **Person privacy.** Owner settings: public/members/private, discoverability, indexing intent, message/invite policy. RLS protects profiles, actors, profession/skill joins and credits. A private applicant remains visible only to the relevant hiring reviewer; accepted project collaborators have relevant access. Contacts have independent scopes and default private. Representatives have separately redacted contact projection. Signed private media supports application/project contexts. Directory RPCs filter and paginate on server. Search robots meta is an SPA hint, not access control or guaranteed search-engine removal.
+17. **Resume.** Persisted `profile_publications`, dedicated `/resumes/new` from global Publish, draft/edit/publish/pause/close, visibility/desired custom professions/cities/travel/availability/rate/description. `/resume/:id` is policy-protected public reading, not profile editing. Canonical desired profession IDs exist/validate in SQL; full canonical profession picker/prefill and integration into the work search directory remain follow-ups.
+18. **Resume entitlements.** Private transaction locks the account, publication and grant; validates active PRO or a single-use resume right, consumes once, writes receipt and request key, then publishes. Double click/retry cannot consume twice. PRO is preferred and never decremented. Pause/reopen of the same licensed publication does not buy a second identity or consume again while its grant is valid. Effective expiry/revocation hides public data. Expiry inherits the grant; no invented price/duration/provider. Paywall says payment is not connected.
+19. **Skills.** Existing IDs retained; actor/professional scope, department, category, sort and activity. Curated actor catalogue and department skills. Relevant-first selection plus show all, grouped labels. Personal custom skills trim whitespace, enforce length 2–80, case-insensitive per-person uniqueness and max 50 under an account lock. Experience tags map old selections without deleting the original skills/links; retired formats are excluded from active skill UI/directory. Custom skills never become canonical automatically.
+20. **Personal Settings.** Persisted privacy, contacts, representation, private media upload/view/visibility, verification, real entitlement read, resume/company links, password reset and logout. Notification preferences/export/account deletion are not fake toggles or fake successful actions; those screens/workflows remain absent. Existing public avatar/gallery URLs cannot be made private retroactively by changing a profile flag.
+21. **Company Settings.** Name/description/city/site/visibility/index intent, team roles/invites and personal public-team consent persist. Creation/settings error states are visible. Rich brand editor, notification preferences and organization deletion/transfer lifecycle need additional work. Role changes are server-enforced immediately; cached UI permissions refresh on context reload, so a removed member can see stale affordances but cannot successfully mutate/read fresh private rows.
+22. **Company entitlements.** Independent `organization_entitlements`; personal PRO does not grant company billing powers. Server-only grants/revokes, finance/owner scoped read, sources and effective dates/counters. No checkout/subscription-provider integration or automatic paid activation.
+23. **Advertising products.** Featured company, promoted job/listing/project, brand campaign catalogue; inactive initially. Promotions can be saved as drafts with marketing permission; client cannot activate or alter billing fields. No actual ad delivery or purchases are claimed.
+24. **Targeting.** Bounded structured professional dimensions: country/city/department/profession/org type/project type/marketplace category. Unknown/sensitive keys rejected. Trusted activation must additionally validate target ownership, catalogue values, billing and campaign suitability; draft target_id is not an authorization grant.
+25. **Analytics.** Server-write daily aggregate schema, nonnegative counts, same-org campaign FK, analytics-permission reads. Browser cannot self-increment impressions/leads or invent ROI. Event ingestion, deduplication/unique viewers, bot filtering and dashboards are not implemented.
+26. **Company inbox.** Server-only `organization_inbox_threads` maps organization+external person to canonical `chat_rooms`; employee direct rooms remain private. This is a schema foundation, **not a working shared inbox**. Before enabling its CTA, implement atomic room creation and synchronized membership on role changes/departure, without joining employee DMs. No second messaging system was introduced.
+27. **Verification.** Approved verification records alone drive badge; entitlement/payment/role never approves verification. Evidence remains outside public projections. Organization verification application/reviewer workflow is not added here.
+28. **RLS/adversarial tests.** Full chronological replay in PGlite PostgreSQL; adversarial A/B/C/D, former employee, last owner, admin escalation, confirmed/expired invite, company spoofing, private budgets/media/contacts, cross-org packages, self-granted billing, private profile by slug/id, work-context revoke, resume rollback/idempotency/PRO, custom limits/dedupe, public consent, pre-layer ID/ownership/selection preservation, RLS and fixed definer search paths. This does not substitute for multi-session hosted PostgreSQL load/concurrency, PostgREST and real Storage integration tests.
+29. **Browser tests.** 20 desktop/mobile Playwright scenarios passed against actual React components with all external services intercepted; auth/recovery/modal regressions plus Resume save/paywall, company-author payload, public rental projection, company identity and personal ownership filtering. Viewport-overflow checks pass. These are isolated fixtures, not evidence of live email, production data, hosted storage upload or two-user realtime. The full Node suite passes 70 tests, including stable company context across same-person token refresh and clearing authority on logout/account switch. Typecheck, lint (0 errors, 7 warnings), and production build pass; the bundle-size warning remains.
+30. **Remaining mocks.** No success-without-write, fake email, payment, booking, ad delivery or metrics added. Browser fixtures are tests only. Pre-existing unrelated home/pulse/demo cards, navigation badges and nonfunctional global search were not broadly rewritten and must not be treated as real business metrics. Some requested future surfaces remain schema-only as listed above.
+31. **Risks.** No live migrations applied. Requires independent architecture/RLS review and staging integration before production. npm ci reported 57 dependency advisories (9 low/18 moderate/30 high); no forced upgrade. Existing live advisor has 8 public SECURITY DEFINER warnings and disabled leaked-password protection; inspected read-only, not changed. Bundle is above Vite's 500 KB warning; lazy routes are a next optimization. Public pages cap their initial related-content sections, media caps 24, memberships cap 100. Search index headers/SSR, file lifecycle cleanup/scanning, invite abuse controls/rate limiting, full concurrent tests and all company-aware legacy UI need further work.
+32. **Actor Search readiness.** Viewer-aware server-paginated directory and canonical skills support the next phase. Advanced casting filters, custom-skill search, full pagination UX and ranking are not a completed Actor Search product.
+33. **Personal Cabinet readiness.** Identity/auth/private settings/resume foundation is available. Notification/export/deletion lifecycle, unified activity and full publication management remain future cabinet work.
+34. **Projects readiness.** Personal/company ownership, partner relationships, minimal real membership/work context are available. Not a full production hub or complete project acceptance/management UI.
+35. **Crew Builder readiness.** Documented needs can resolve to person (DP), organization/vendor (post house), or inventory/package (camera package). Do not collapse procurement into a list of user IDs. Search/shortlist/invitation/team orchestration remains unbuilt.
+36. **Casting Room readiness.** Private applicant context, canonical direct chat, media scopes and company hiring permissions are available. Reviewer shortlist/waitlist/reject/approve, role-specific submissions and complete casting workflows remain unbuilt.
+
+## Future connections / review gates
+
+## Stage 1 correction — implementation boundary
+
+**IMPLEMENTED UI:** independent Resume audience editor (`public`, `hiring_members`,
+`link_only`), deliberately editable professional display name, create/rotate and
+revoke bearer links; safe invitation company names and optional privacy-filtered
+inviter names; role options constrained by actual owner/admin transition rules;
+cross-role skills in both pickers; content discovery reads filtered views while
+direct `/work/:id`, `/project/:id`, `/listing/:id` and company routes retain RLS.
+
+**IMPLEMENTED DATABASE FOUNDATION:** new corrective migration
+`20260919002944_product_layer_ii_corrections.sql`; explicit contact/media SELECT
+grants with unchanged audience guards; representations remain raw-owner-only,
+with safe redacted RPC for other permitted viewers, including work context.
+Public Resume no longer calls `person_visible`; only its explicit publication
+fields are returned, never private profile fields. Hiring audience checks active
+personal vacancies, non-completed personal projects with a declared stage, or
+active organization `publish_jobs`/`review_applications` membership. A vacancy's
+`hiring_active` flag is persisted and protected by existing ownership rules.
+Link-only publications are not enumerable in discovery and cannot be read by ID;
+an explicit 64-hex-character random bearer is hashed with SHA-256 in a private
+RLS table. Owners may rotate/revoke it. Pause, expiry and entitlement revocation
+also block shared reads. The link is a transferable capability, not a recipient
+identity guarantee; users are warned before sharing. Raw keys are never listed.
+Legacy private publications become link-only without a generated key (still
+owner-only); old members publications become hiring-only (narrower audience).
+Canonical/custom skill scopes support `both` without new copies or changed IDs.
+Structured language/proficiency storage exists separately from generic skills.
+
+**FUTURE ONLY:** a language editor, full hiring lifecycle UI (including vacancy
+closure rather than current removal), hosted end-to-end integration, and a
+dedicated Resume search screen. Existing directory pages still cap content lists;
+this correction does not claim complete server pagination for every legacy page.
+Full shared inbox, advertising execution and other incomplete surfaces above
+remain unbuilt. No Model/Student work belongs in this PR.
+
+**Security evidence:** role-switched PostgreSQL tests cover explicit GRANTs,
+public/members/private/work-context contacts/media/representations, private
+profile + public Resume, hiring denial/allow, invalid/revoked link, raw-key denial,
+safe invitation access and direct-vs-discovery behavior. Browser fixtures verify
+the corresponding presentation/API request boundaries; they are not hosted
+Supabase proof. Correction gates passed: npm ci; typecheck; lint (0 errors/7
+warnings); all 75 Node tests including chronological replay and adversarial RLS;
+build; 26 desktop/mobile Playwright scenarios. Fresh dependency audit: 21
+advisories (3 low, 5 moderate, 13 high), no dependency changes. Hosted advisor
+still reports 8 exposed-definer warnings and disabled leaked-password protection;
+read-only inspection does not validate unapplied migrations. PR #4 is frozen for
+review after this correction; next work starts on its stacked branch.
+
+Final leakage review: person-owned Pulse rows now obey person visibility under a restrictive read policy. Company publication no longer emits an employee-owned public Pulse event: a private company's title must not leak through that legacy side effect. Company activity needs a future canonical visibility-aware event path. System-owned Pulse records remain trusted-server-only as in the reviewed foundation.
+
+Agency flow: client brief → agency → project → production partner selection → people/crew → equipment → cast → delivery. The relationship graph records companies without granting private commercial data by merely listing them.
+
+Shared inbox must synchronize canonical chat membership in the same transaction as company access changes. Define whether external users may see individual handler identity, retention on staff departure and organization owner transfer. Until then the company page offers its real website/public offers, not a fake message action.
+
+Do not apply these migrations until a disposable staging replay, PostgREST permissions, Storage signed URLs/uploads, invite delivery decisions and concurrent entitlement/member-removal tests are reviewed. Restore/rollback planning must preserve new content rather than drop tables. The Supabase skills informed private definer placement, fixed search paths, positive mutation grants, RLS and least-privilege decisions.
+
+**Wait for architectural review. No merge or production rollout.**

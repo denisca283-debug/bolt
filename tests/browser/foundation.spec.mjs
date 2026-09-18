@@ -31,6 +31,41 @@ async function setup(page,{signedIn=false,validation='ok',profileError=false}={}
   return state;
 }
 
+test('unlisted company and content resolve directly, but discovery excludes them',async({page})=>{
+ await setup(page);
+ await page.route('**/rest/v1/rpc/company_search',r=>r.fulfill({json:[]}));
+ await page.route('**/rest/v1/rpc/company_public',r=>r.fulfill({json:{id:'hidden',name:'Unlisted studio',organization_type:'studio'}}));
+ await page.route('**/rest/v1/rpc/company_team',r=>r.fulfill({json:[]}));
+ await page.goto('/#/companies');await expect(page.getByText('По этим условиям компаний не найдено.')).toBeVisible();
+ await page.goto('/#/company/unlisted');await expect(page.getByRole('heading',{name:'Unlisted studio'})).toBeVisible();
+ await page.route('**/rest/v1/projects*',r=>r.fulfill({json:new URL(r.request().url()).pathname.endsWith('_discovery')?[]:{title:'Direct project',description:'Link only'}}));
+ await page.goto('/#/projects');await expect(page.getByText('Direct project')).toHaveCount(0);
+ await page.goto('/#/project/hidden');await expect(page.getByRole('heading',{name:'Direct project'})).toBeVisible();
+});
+test('Resume bearer link uses explicit RPC token; plain id cannot open link-only publication',async({page})=>{
+ await setup(page);const token='a'.repeat(64);
+ await page.route('**/rest/v1/rpc/resume_read',r=>r.fulfill({json:r.request().postDataJSON().p_token===token?{id:'resume',user_id:user.id,display_name:'Resume identity',headline:'Independent resume',custom_professions:[],cities:[],description:'Public professional data'}:null}));
+ await page.goto('/#/resume/resume');await expect(page.getByText('Резюме не опубликовано или недоступно.')).toBeVisible();
+ await page.goto('/#/resume-share/resume/'+token);await expect(page.getByRole('heading',{name:'Independent resume'})).toBeVisible();
+ await expect(page.getByText('Resume identity')).toBeVisible();
+ await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
+});
+test('invitation names company and admin cannot offer privileged roles',async({page})=>{
+ await setup(page,{signedIn:true});
+ const company={id:'company-a',name:'Managed Studio',slug:'managed',organization_type:'studio'};
+ await page.route('**/rest/v1/organizations*',r=>r.fulfill({json:[company]}));
+ await page.route('**/rest/v1/organization_members*',r=>r.fulfill({json:[{organization_id:company.id,user_id:user.id,role:'admin',active:true}]}));
+ await page.route('**/rest/v1/organization_role_permissions*',r=>r.fulfill({json:[{role_key:'admin',permission:'manage_members'}]}));
+ await page.route('**/rest/v1/organization_roles*',r=>r.fulfill({json:['owner','admin','finance','producer','member'].map(key=>({key,label:key}))}));
+ await page.route('**/rest/v1/rpc/organization_invitation_cards',r=>r.fulfill({json:[{id:'invite',organization_id:'private-company-id',organization_name:'Inviting Film School',organization_type:'education',role_key:'member',status:'pending',is_recipient:true,expires_at:'2027-01-01'}]}));
+ await page.goto('/#/organizations');await expect(page.getByText(/Inviting Film School/)).toBeVisible();
+ await expect(page.getByText(/private-company-id/)).toHaveCount(0);
+ await page.getByRole('button',{name:/Managed Studio/}).click();
+ const options=page.getByLabel('Роль приглашённого').locator('option');await expect(options).toHaveCount(2);
+ expect(await options.allTextContents()).toEqual(['producer','member']);
+ await expect(page.getByLabel('Роль '+user.id,{exact:true})).toBeDisabled();
+});
+
 test('guest app load, auth modal close, protected route and invalid recovery route',async({page})=>{
   await setup(page); await page.goto('/');
   const trigger=page.getByRole('button',{name:'Регистрация',exact:true}).last();
@@ -96,4 +131,73 @@ test('real CreateDialog vacancy is viewport-safe at its last field',async({page}
   const close=dialog.getByRole('button',{name:'Закрыть',exact:true});
   const box=await close.boundingBox(); expect(box.y).toBeGreaterThanOrEqual(0); expect(box.y+box.height).toBeLessThan(page.viewportSize().height);
   await close.click(); await expect(dialog).toHaveCount(0);
+});
+
+test('Resume opens dedicated creation, persists draft, and shows honest entitlement gate',async({page})=>{
+  await setup(page,{signedIn:true}); const rows=[];
+  await page.route('**/rest/v1/resume_publications*',route=>route.fulfill({json:rows}));
+  await page.route('**/rest/v1/profile_publications*',async route=>{
+    const body=route.request().postDataJSON(); rows.push({...body,id:'resume-fixture',status:'draft'});
+    await route.fulfill({json:{id:'resume-fixture'}});
+  });
+  await page.route('**/rest/v1/rpc/resume_publish',route=>route.fulfill({status:403,json:{code:'42501',message:'resume_entitlement_required'}}));
+  await page.goto('/'); await page.getByRole('button',{name:'Разместить',exact:true}).click();
+  await page.getByRole('button',{name:/Резюме/}).click();
+  await expect(page).toHaveURL(/resumes\/new/);
+  const dialog=page.getByRole('dialog'); await expect(dialog.getByRole('heading',{name:'Новое резюме'})).toBeVisible();
+  await dialog.getByLabel('Заголовок').fill('Оператор — ищу работу');
+  await dialog.getByRole('button',{name:'Сохранить',exact:true}).click();
+  await expect(dialog).toHaveCount(0); await expect(page.getByText('Черновик',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Опубликовать',exact:true}).click();
+  await expect(page.getByRole('dialog').getByText(/Оплата пока не подключена/)).toBeVisible();
+  expect(rows).toHaveLength(1); expect(rows[0].status).toBe('draft');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+});
+
+test('multi-company context freezes publication author; payload names company not employee ownership',async({page})=>{
+  await setup(page,{signedIn:true});
+  const companies=[{id:'company-a',name:'Production A',slug:'production-a',organization_type:'production_company'},{id:'company-b',name:'Agency B',slug:'agency-b',organization_type:'agency'}];
+  await page.route('**/rest/v1/organizations*',route=>route.fulfill({json:companies}));
+  await page.route('**/rest/v1/organization_members*',route=>route.fulfill({json:companies.map(o=>({organization_id:o.id,role:'owner',active:true}))}));
+  await page.route('**/rest/v1/organization_role_permissions*',route=>route.fulfill({json:[{role_key:'owner',permission:'publish_jobs'}]}));
+  let sent; let pulseWrites=0;
+  await page.route('**/rest/v1/pulse_feed*',route=>{ if(route.request().method()==='POST')pulseWrites++; return route.fulfill({json:[]}); });
+  await page.route('**/rest/v1/work_opportunities*',route=>{
+    if(route.request().method()==='POST'){sent=route.request().postDataJSON(); return route.fulfill({json:{id:'work-fixture'}});}
+    return route.fulfill({json:[]});
+  });
+  await page.goto('/'); const context=page.getByLabel('Рабочий контекст');
+  await expect(context.locator('option')).toHaveCount(4); await context.selectOption('company-b');
+  await page.getByRole('button',{name:'Разместить',exact:true}).click(); await page.getByRole('button',{name:/Вакансию/}).click();
+  const dialog=page.getByRole('dialog'); await expect(dialog.getByText(/компании «Agency B»/)).toBeVisible();
+  await dialog.locator('input').first().fill('Главная роль в фильме');
+  await dialog.getByRole('button',{name:/Опубликовать/}).click();
+  await expect.poll(()=>sent?.organization_id).toBe('company-b'); expect(sent.user_id).toBe(user.id);
+  await expect(dialog).toHaveCount(0); expect(pulseWrites).toBe(0);
+});
+
+test('company public page shows only safe projection and approved badge',async({page})=>{
+  await setup(page);
+  await page.route('**/rest/v1/rpc/company_public',route=>route.fulfill({json:{id:'company',slug:'rental',name:'Rental Test',organization_type:'rental_house',description:'Профессиональная аренда',verified:false,search_engine_indexable:false}}));
+  await page.route('**/rest/v1/rpc/company_team',route=>route.fulfill({json:[]}));
+  await page.goto('/#/company/rental'); await expect(page.getByRole('heading',{name:'Rental Test'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Оборудование и предложения аренды'})).toBeVisible();
+  await expect(page.getByText('Проверена',{exact:false})).toHaveCount(0);
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+});
+
+test('company content names company, not employee; personal ownership filter and deletion do not inherit creator identity',async({page})=>{
+  await setup(page,{signedIn:true});
+  await page.route('**/rest/v1/rpc/company_cards',route=>route.fulfill({json:[{id:'company-a',name:'Rental Company',slug:'rental-company'}]}));
+  const common={id:'content-a',user_id:user.id,organization_id:'company-a',title:'Company-owned camera',city:'Москва',created_at:new Date().toISOString()};
+  await page.route('**/rest/v1/work_opportunities*',route=>route.fulfill({json:[{...common,type:'job',audience:'Специалисты'}]}));
+  await page.goto('/#/work'); await page.getByRole('button',{name:/Company-owned camera/}).click();
+  await expect(page.getByRole('button',{name:'Rental Company',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Снять с публикации/})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:/Написать/})).toHaveCount(0);
+  await page.route('**/rest/v1/marketplace_listings*',route=>route.fulfill({json:[{...common,mode:'Аренда',category:'Камеры'}]}));
+  await page.goto('/#/marketplace'); await expect(page.getByText('Rental Company',{exact:true})).toBeVisible();
+  await page.getByText('Мои личные объявления',{exact:true}).click();
+  await expect(page.getByRole('button',{name:/Company-owned camera/})).toHaveCount(0);
 });
