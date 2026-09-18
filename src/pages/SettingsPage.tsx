@@ -1,61 +1,103 @@
-import { Settings, Bell, Lock, Palette, Globe, Share2 } from 'lucide-react';
-import { Card, Badge } from '../components/ui';
-
-const sections = [
-  {
-    icon: Bell,
-    title: 'Уведомления',
-    description: 'Управление email- и push-уведомлениями',
-  },
-  {
-    icon: Lock,
-    title: 'Конфиденциальность',
-    description: 'Видимость профиля и контактной информации',
-  },
-  {
-    icon: Palette,
-    title: 'Внешний вид',
-    description: 'Светлая тема активна',
-    badge: 'Включено',
-  },
-  {
-    icon: Globe,
-    title: 'Язык интерфейса',
-    description: 'Русский',
-    badge: 'RU',
-  },
-  {
-    icon: Share2,
-    title: 'Поделиться профилем',
-    description: 'Скопировать ссылку на ваш профиль',
-    badge: 'Ссылка',
-  },
-];
+import { Settings, Globe, Share2, Mail, LogOut, Star, Check } from 'lucide-react';
+import { useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
+import { VerificationPanel } from '../components/VerificationPanel';
 
 export function SettingsPage() {
+  const { user, profile, signOut } = useAuth();
+  const [copied, setCopied] = useState(false);
+
+  const publicUrl = profile?.public_slug
+    ? `${window.location.origin}/#/u/${profile.public_slug}`
+    : null;
+
+  const copyLink = () => {
+    if (!publicUrl) return;
+    navigator.clipboard?.writeText(publicUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const isPro = profile?.plan === 'pro';
+
   return (
     <div className="animate-fade-in max-w-2xl">
       <div className="mb-6 flex items-center gap-3">
-        <Settings className="h-6 w-6 text-fern-600" strokeWidth={1.6} />
+        <Settings className="h-6 w-6 text-emerald-500" strokeWidth={1.6} />
         <div>
-          <h1 className="font-display text-2xl sm:text-3xl font-semibold text-ink-900 tracking-tight">Настройки</h1>
-          <p className="mt-0.5 text-sm text-ink-500">Управление аккаунтом и предпочтениями</p>
+          <h1 className="font-display text-2xl sm:text-3xl font-semibold text-txt-primary tracking-tight">Настройки</h1>
+          <p className="mt-0.5 text-sm text-txt-secondary">Аккаунт, доверие и доступ</p>
         </div>
       </div>
 
-      <div className="space-y-3">
-        {sections.map((s) => (
-          <Card key={s.title} className="p-5 flex items-center gap-4 hover:shadow-card transition-all duration-200 cursor-pointer">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-paper-200">
-              <s.icon className="h-5 w-5 text-ink-600" strokeWidth={1.6} />
+      <div className="space-y-4">
+        {/* Verification — the real trust layer */}
+        <VerificationPanel />
+
+        {/* Account */}
+        <div className="surface p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-txt-primary">Аккаунт</h2>
+
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-700 border border-line-soft shrink-0">
+              <Mail className="h-4 w-4 text-txt-secondary" strokeWidth={1.6} />
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-ink-900">{s.title}</p>
-              <p className="text-xs text-ink-400 mt-0.5">{s.description}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-txt-primary truncate">{user?.email || '—'}</p>
+              <p className="text-xs text-txt-muted mt-0.5">Почта входа</p>
             </div>
-            {s.badge && <Badge variant={s.badge === 'Ссылка' ? 'neutral' : 'fern'}>{s.badge}</Badge>}
-          </Card>
-        ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-700 border border-line-soft shrink-0">
+              <Star className={`h-4 w-4 ${isPro ? 'text-emerald-500' : 'text-txt-secondary'}`} strokeWidth={1.6} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-txt-primary">{isPro ? 'Про' : 'Бесплатный'}</p>
+              <p className="text-xs text-txt-muted mt-0.5">
+                {isPro ? 'Открыты чаты департаментов при двойной верификации' : 'Оплата подписки пока не подключена'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-700 border border-line-soft shrink-0">
+              <Share2 className="h-4 w-4 text-txt-secondary" strokeWidth={1.6} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-txt-primary truncate">
+                {publicUrl ? publicUrl.replace(`${window.location.origin}/#`, '') : 'Ссылка появится после заполнения профиля'}
+              </p>
+              <p className="text-xs text-txt-muted mt-0.5">Публичная ссылка на профиль — открывается без регистрации</p>
+            </div>
+            {publicUrl && (
+              <button onClick={copyLink} className="btn-secondary shrink-0 !py-2 !px-3 text-xs">
+                {copied ? <><Check className="h-3.5 w-3.5 text-emerald-500" /> Скопировано</> : 'Копировать'}
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-700 border border-line-soft shrink-0">
+              <Globe className="h-4 w-4 text-txt-secondary" strokeWidth={1.6} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-txt-primary">Русский</p>
+              <p className="text-xs text-txt-muted mt-0.5">Язык интерфейса</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Exit */}
+        <div className="surface p-6 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-txt-primary">Выйти из аккаунта</p>
+            <p className="text-xs text-txt-muted mt-0.5">Профиль и переписка сохранятся</p>
+          </div>
+          <button onClick={signOut} className="btn-secondary shrink-0">
+            <LogOut className="h-4 w-4" /> Выйти
+          </button>
+        </div>
       </div>
     </div>
   );

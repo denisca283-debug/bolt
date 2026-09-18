@@ -1,81 +1,169 @@
+import { useState, useEffect, useCallback } from 'react';
 import {
-  Award, Search, Users, Camera, CheckCircle2, Briefcase, FileImage,
+  Award, Search, Users, Camera, CheckCircle2, Briefcase, FileImage, Activity, Loader2, Plus,
 } from 'lucide-react';
-import { pulseFeed, type PulseItem } from '../data/mock';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
+import { useAuthModal } from '../components/AuthModal';
+import { CreateDialog } from '../components/create/CreateDialog';
+import { useRouter } from '../router';
+import type { PulseEntry } from '../types';
 
-const kindConfig: Record<PulseItem['kind'], { icon: typeof Award; label: string; color: string }> = {
-  role: { icon: Award, label: 'Роль', color: 'bg-fern-100 text-fern-700' },
-  'crew-search': { icon: Search, label: 'Поиск группы', color: 'bg-blue-100 text-blue-700' },
-  portfolio: { icon: FileImage, label: 'Портфолио', color: 'bg-amber-100 text-amber-700' },
-  join: { icon: Users, label: 'Команда', color: 'bg-purple-100 text-purple-700' },
-  spots: { icon: Briefcase, label: 'Массовка', color: 'bg-stone-800 text-paper-100' },
-  marketplace: { icon: Camera, label: 'Кинобарахолка', color: 'bg-cyan-100 text-cyan-700' },
-  'team-complete': { icon: CheckCircle2, label: 'Команда готова', color: 'bg-fern-600 text-white' },
+const KIND_CONFIG: Record<string, { icon: typeof Award; label: string; color: string }> = {
+  role: { icon: Award, label: 'Проект', color: 'chip-fern' },
+  'crew-search': { icon: Search, label: 'Поиск группы', color: 'chip-stone' },
+  portfolio: { icon: FileImage, label: 'Портфолио', color: 'chip-neutral' },
+  join: { icon: Users, label: 'Команда', color: 'chip-neutral' },
+  spots: { icon: Briefcase, label: 'Набор', color: 'chip-stone' },
+  marketplace: { icon: Camera, label: 'Кинобарахолка', color: 'chip-neutral' },
+  'team-complete': { icon: CheckCircle2, label: 'Команда готова', color: 'chip-fern' },
 };
 
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ч назад`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return 'вчера';
+  if (d < 30) return `${d} дн. назад`;
+  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
 export function PulsePage() {
+  const { user } = useAuth();
+  const { promptGuest } = useAuthModal();
+  const { navigate } = useRouter();
+
+  const [items, setItems] = useState<PulseEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [schemaMissing, setSchemaMissing] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('pulse_feed')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) {
+      setSchemaMissing(true);
+      setLoading(false);
+      return;
+    }
+    setSchemaMissing(false);
+    setItems((data || []) as PulseEntry[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const openCreate = () => {
+    if (!user) {
+      promptGuest({ message: 'Чтобы опубликовать что-то в FilmVerse, войдите или создайте аккаунт.' });
+      return;
+    }
+    setShowCreate(true);
+  };
+
   return (
     <div className="animate-fade-in max-w-3xl">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="font-display text-3xl sm:text-4xl font-semibold text-ink-900 tracking-tight">
-          Пульс индустрии
-        </h1>
-        <p className="mt-2 text-base text-ink-500">
-          Что происходит в киносообществе прямо сейчас
-        </p>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl sm:text-4xl font-semibold text-txt-primary tracking-tight">
+            Пульс индустрии
+          </h1>
+          <p className="mt-2 text-base text-txt-secondary">
+            Что происходит в киносообществе прямо сейчас
+          </p>
+        </div>
+        <button onClick={openCreate} className="btn-secondary">
+          <Plus className="h-4 w-4" /> Разместить
+        </button>
       </div>
 
-      {/* Feed */}
-      <div className="space-y-4">
-        {pulseFeed.map((item) => {
-          const cfg = kindConfig[item.kind];
-          const Icon = cfg.icon;
-          return (
-            <div
-              key={item.id}
-              className="surface p-5 flex items-start gap-4 hover:shadow-card transition-all duration-200 animate-fade-up"
-            >
-              {/* Avatar or icon */}
-              {item.photo ? (
-                <div className="relative shrink-0">
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-stone-200">
-                    <img src={item.photo} alt={item.person} className="portrait-img" />
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-6 w-6 text-emerald-500 animate-spin" />
+        </div>
+      ) : schemaMissing ? (
+        <div className="surface p-6">
+          <h2 className="text-sm font-semibold text-txt-primary mb-1">База ещё не обновлена</h2>
+          <p className="text-sm text-txt-secondary leading-relaxed">
+            Ленте нужна таблица <span className="text-txt-primary">pulse_feed</span>. Выполните
+            миграцию <span className="text-txt-primary">009_communication_tables</span> в панели базы данных.
+          </p>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="surface p-12 text-center">
+          <Activity className="h-8 w-8 text-txt-muted mx-auto mb-4" strokeWidth={1.5} />
+          <p className="text-txt-primary text-lg font-medium">В ленте пока пусто</p>
+          <p className="text-txt-secondary text-sm mt-2 max-w-md mx-auto leading-relaxed">
+            Пульс собирается из реальных действий: кто-то разместил объявление, открыл проект
+            или начал искать группу. Опубликуйте что-нибудь — и это появится здесь первым.
+          </p>
+          <button onClick={openCreate} className="mt-5 btn-primary">
+            <Plus className="h-4 w-4" /> Разместить
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {items.map((item) => {
+            const cfg = KIND_CONFIG[item.kind] || KIND_CONFIG.portfolio;
+            const Icon = cfg.icon;
+            return (
+              <div
+                key={item.id}
+                className="surface p-5 flex items-start gap-4 hover:border-line-strong transition-all duration-200 animate-fade-up"
+              >
+                {item.photo_url ? (
+                  <div className="relative shrink-0">
+                    <div className="w-12 h-12 rounded-full overflow-hidden bg-surface-700">
+                      <img src={item.photo_url} alt={item.person} className="portrait-img" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-surface-500 border border-line flex items-center justify-center">
+                      <Icon className="h-3 w-3 text-txt-secondary" strokeWidth={2} />
+                    </div>
                   </div>
-                  <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-stone-300 flex items-center justify-center">
-                    <Icon className="h-3 w-3 text-ink-600" strokeWidth={2} />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-surface-500 border border-line flex items-center justify-center text-txt-primary font-semibold text-sm shrink-0">
+                    {item.initials || '—'}
                   </div>
-                </div>
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-stone-800 flex items-center justify-center text-paper-100 font-semibold text-sm shrink-0">
-                  {item.initials}
-                </div>
-              )}
+                )}
 
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={`chip ${cfg.color} !py-0.5`}>
-                    <Icon className="h-3 w-3" />
-                    {cfg.label}
-                  </span>
-                  <span className="text-xs text-ink-400">{item.time}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`chip ${cfg.color} !py-0.5`}>
+                      <Icon className="h-3 w-3" />
+                      {cfg.label}
+                    </span>
+                    <span className="text-xs text-txt-muted">{timeAgo(item.created_at)}</span>
+                  </div>
+                  <p className="text-sm text-txt-secondary leading-relaxed">
+                    <span className="font-semibold text-txt-primary">{item.person}</span>{' '}
+                    <span>{item.action}</span>{' '}
+                    {item.target && <span className="font-medium text-emerald-600">{item.target}</span>}
+                  </p>
                 </div>
-                <p className="text-sm text-ink-700 leading-relaxed">
-                  <span className="font-semibold text-ink-900">{item.person}</span>{' '}
-                  <span className="text-ink-500">{item.action}</span>{' '}
-                  <span className="font-medium text-fern-700">{item.target}</span>
-                </p>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Footer note */}
-      <div className="mt-8 text-center">
-        <p className="text-sm text-ink-400">Это начало ленты — больше активности появится по мере роста сообщества</p>
-      </div>
+      {showCreate && (
+        <CreateDialog
+          onClose={() => setShowCreate(false)}
+          onCreated={(kind, id) => {
+            setShowCreate(false);
+            if (kind === 'listing') navigate(`/listing/${id}`);
+            else load();
+          }}
+        />
+      )}
     </div>
   );
 }

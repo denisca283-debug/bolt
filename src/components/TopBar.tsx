@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { Search, Plus, Bell, Menu, LogIn, UserPlus } from 'lucide-react';
 import { useRouter } from '../router';
 import { Avatar, IconButton } from './ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from './AuthModal';
+import { CreateDialog } from './create/CreateDialog';
 
 type TopBarProps = {
   onMenuClick: () => void;
@@ -10,6 +12,7 @@ type TopBarProps = {
 
 export function TopBar({ onMenuClick }: TopBarProps) {
   const { navigate } = useRouter();
+  const [showCreate, setShowCreate] = useState(false);
   const { profile, user, isAuthenticated, hasBeenAuthenticated } = useAuth();
   const { openLogin, openRegister } = useAuthModal();
   // Keep showing the authenticated chrome during a transient session gap
@@ -46,15 +49,15 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
       {showAuthedUI ? (
         <>
-          {/* Quick action */}
+          {/* Quick action — opens the publish dialog, not just another page */}
           <button
-            onClick={() => navigate('/work')}
+            onClick={() => setShowCreate(true)}
             className="btn-primary hidden sm:inline-flex"
           >
             <Plus className="h-4 w-4" />
             <span>Разместить</span>
           </button>
-          <button onClick={() => navigate('/work')} className="btn-primary sm:hidden !px-2.5" aria-label="Разместить">
+          <button onClick={() => setShowCreate(true)} className="btn-primary sm:hidden !px-2.5" aria-label="Разместить">
             <Plus className="h-4 w-4" />
           </button>
 
@@ -92,6 +95,18 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             <span>Регистрация</span>
           </button>
         </div>
+      )}
+
+      {showCreate && (
+        <CreateDialog
+          onClose={() => setShowCreate(false)}
+          onCreated={(kind, id) => {
+            setShowCreate(false);
+            if (kind === 'listing') navigate(`/listing/${id}`);
+            else if (kind === 'work') navigate('/work');
+            else navigate('/projects');
+          }}
+        />
       )}
     </header>
   );

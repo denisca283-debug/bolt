@@ -151,12 +151,15 @@ export function ActorProfilePage({ actorId }: { actorId: string }) {
               <UserPlus className="h-4 w-4" />
               Пригласить
             </button>
+            {/* Demo card: there is no account behind it, so instead of a
+                button that goes nowhere, point at the real people. */}
             <button
-              onClick={() => navigate('/messages')}
+              onClick={() => navigate('/actors')}
               className="btn-secondary"
+              title="Это демонстрационная анкета — у неё нет аккаунта"
             >
               <Mail className="h-4 w-4" />
-              Написать
+              Написать живым актёрам
             </button>
             <ShareButton />
           </div>

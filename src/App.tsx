@@ -15,11 +15,21 @@ import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PulsePage } from './pages/PulsePage';
 import { ProfessionalsPage } from './pages/ProfessionalsPage';
+import { ListingPage } from './pages/ListingPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { PRIVATE_ROUTES } from './components/nav-config';
 import { Loader2 } from 'lucide-react';
+
+/**
+ * Private routes carry sub-paths now (/messages/<roomId>), so an exact-set
+ * lookup would let a guest through to the child route.
+ */
+function isPrivatePath(path: string) {
+  if (PRIVATE_ROUTES.has(path)) return true;
+  return [...PRIVATE_ROUTES].some((p) => path.startsWith(`${p}/`));
+}
 
 const STANDALONE_AUTH_ROUTES = new Set(['/forgot-password', '/reset-password']);
 
@@ -39,6 +49,12 @@ function PageRouter() {
 
   const publicSlug = getRouteParam(path, '/u');
   if (publicSlug) return <ProfilePage slug={publicSlug} />;
+
+  const listingId = getRouteParam(path, '/listing');
+  if (listingId) return <ListingPage listingId={listingId} />;
+
+  const roomId = getRouteParam(path, '/messages');
+  if (roomId) return <MessagesPage initialRoomId={roomId} />;
 
   switch (path) {
     case '/':
@@ -81,7 +97,7 @@ function PrivateRouteGuard() {
     if (isAuthenticated) return;
     // Don't redirect a previously-authenticated user on a transient session gap
     if (hasBeenAuthenticated) return;
-    if (!PRIVATE_ROUTES.has(path)) return;
+    if (!isPrivatePath(path)) return;
     if (handledRef.current === path) return;
 
     handledRef.current = path;
@@ -92,7 +108,7 @@ function PrivateRouteGuard() {
 
   // Reset handled ref when path changes to a non-private route
   useEffect(() => {
-    if (!PRIVATE_ROUTES.has(path)) {
+    if (!isPrivatePath(path)) {
       handledRef.current = null;
     }
   }, [path]);
@@ -123,7 +139,7 @@ function AppContent() {
   // Only show the blocking spinner for users who were NEVER authenticated in this
   // session. If a previously-authenticated user's session flickers (token refresh,
   // transient null), keep the page mounted so edit state is not destroyed.
-  if (!isAuthenticated && PRIVATE_ROUTES.has(path) && !hasBeenAuthenticated) {
+  if (!isAuthenticated && isPrivatePath(path) && !hasBeenAuthenticated) {
     return (
       <>
         <PrivateRouteGuard />

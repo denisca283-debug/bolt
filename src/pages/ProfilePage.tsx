@@ -11,6 +11,7 @@ import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
 import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
 import { SkillsPicker } from '../components/profile/SkillsPicker';
+import { MessageButton } from '../components/MessageButton';
 import type { Actor, Department, Profession, Profile, Skill } from '../types';
 
 type PrimaryProfession = {
@@ -852,6 +853,15 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
                 >
                   <Edit3 className="h-4 w-4" /> Редактировать
                 </button>
+              )}
+              {/* Someone else's profile: writing to them starts here, not on
+                  a dead link to the messages list. */}
+              {!isOwnProfile && (
+                <MessageButton
+                  targetUserId={displayProfile?.id}
+                  targetName={displayProfile?.full_name}
+                  variant="primary"
+                />
               )}
               <ShareButton />
             </div>
