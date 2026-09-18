@@ -142,6 +142,7 @@ export type MarketplaceListing = {
 
 export type WorkOpportunity = {
   id: string;
+  organization_id?: string | null;
   user_id: string;
   title: string;
   type: string;
@@ -163,6 +164,7 @@ export type WorkOpportunity = {
 };
 
 export type ProjectRow = {
+  organization_id?: string | null;
   id: string;
   user_id: string;
   title: string;

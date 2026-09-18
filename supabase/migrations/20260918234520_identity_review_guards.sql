@@ -1,4 +1,6 @@
 BEGIN;
+CREATE POLICY pulse_person_privacy ON public.pulse_feed AS RESTRICTIVE FOR SELECT TO anon,authenticated
+ USING(user_id IS NULL OR filmverse_private.person_visible(user_id));
 ALTER TABLE public.organization_promotions ADD CONSTRAINT promotion_org_identity UNIQUE(organization_id,id);
 ALTER TABLE public.organization_campaign_daily_metrics ADD CONSTRAINT metrics_same_org
  FOREIGN KEY(organization_id,promotion_id) REFERENCES public.organization_promotions(organization_id,id) ON DELETE CASCADE;

@@ -125,7 +125,8 @@ test('multi-company context freezes publication author; payload names company no
   await page.route('**/rest/v1/organizations*',route=>route.fulfill({json:companies}));
   await page.route('**/rest/v1/organization_members*',route=>route.fulfill({json:companies.map(o=>({organization_id:o.id,role:'owner',active:true}))}));
   await page.route('**/rest/v1/organization_role_permissions*',route=>route.fulfill({json:[{role_key:'owner',permission:'publish_jobs'}]}));
-  let sent;
+  let sent; let pulseWrites=0;
+  await page.route('**/rest/v1/pulse_feed*',route=>{ if(route.request().method()==='POST')pulseWrites++; return route.fulfill({json:[]}); });
   await page.route('**/rest/v1/work_opportunities*',route=>{
     if(route.request().method()==='POST'){sent=route.request().postDataJSON(); return route.fulfill({json:{id:'work-fixture'}});}
     return route.fulfill({json:[]});
@@ -137,6 +138,7 @@ test('multi-company context freezes publication author; payload names company no
   await dialog.locator('input').first().fill('Главная роль в фильме');
   await dialog.getByRole('button',{name:/Опубликовать/}).click();
   await expect.poll(()=>sent?.organization_id).toBe('company-b'); expect(sent.user_id).toBe(user.id);
+  await expect(dialog).toHaveCount(0); expect(pulseWrites).toBe(0);
 });
 
 test('company public page shows only safe projection and approved badge',async({page})=>{
@@ -148,4 +150,19 @@ test('company public page shows only safe projection and approved badge',async({
   await expect(page.getByText('Проверена',{exact:false})).toHaveCount(0);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+});
+
+test('company content names company, not employee; personal ownership filter and deletion do not inherit creator identity',async({page})=>{
+  await setup(page,{signedIn:true});
+  await page.route('**/rest/v1/rpc/company_cards',route=>route.fulfill({json:[{id:'company-a',name:'Rental Company',slug:'rental-company'}]}));
+  const common={id:'content-a',user_id:user.id,organization_id:'company-a',title:'Company-owned camera',city:'Москва',created_at:new Date().toISOString()};
+  await page.route('**/rest/v1/work_opportunities*',route=>route.fulfill({json:[{...common,type:'job',audience:'Специалисты'}]}));
+  await page.goto('/#/work'); await page.getByRole('button',{name:/Company-owned camera/}).click();
+  await expect(page.getByRole('button',{name:'Rental Company',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Снять с публикации/})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:/Написать/})).toHaveCount(0);
+  await page.route('**/rest/v1/marketplace_listings*',route=>route.fulfill({json:[{...common,mode:'Аренда',category:'Камеры'}]}));
+  await page.goto('/#/marketplace'); await expect(page.getByText('Rental Company',{exact:true})).toBeVisible();
+  await page.getByText('Мои личные объявления',{exact:true}).click();
+  await expect(page.getByRole('button',{name:/Company-owned camera/})).toHaveCount(0);
 });

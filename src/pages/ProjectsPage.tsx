@@ -3,17 +3,21 @@ import { Loader2, MapPin, Users, Clapperboard, Search, ImageOff, Plus } from 'lu
 import { supabase } from '../lib/supabase';
 import { CreateDialog } from '../components/create/CreateDialog';
 import { useAuth } from '../hooks/useAuth';
+import { useCompanyCards } from '../hooks/useCompanyCards';
+import { useRouter } from '../router';
 import { useAuthModal } from '../components/AuthModal';
 import type { ProjectRow } from '../types';
 
 const STAGES = ['Все', 'Разработка', 'Препродакшн', 'Съёмки', 'Постпродакшн', 'Завершён'];
 
 export function ProjectsPage() {
+  const { navigate } = useRouter();
   const { user } = useAuth();
   const { promptGuest } = useAuthModal();
   const [showCreate, setShowCreate] = useState(false);
 
   const [items, setItems] = useState<ProjectRow[]>([]);
+  const { companies } = useCompanyCards(items);
   const [loading, setLoading] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [query, setQuery] = useState('');
@@ -150,6 +154,7 @@ export function ProjectsPage() {
               <div className="p-5 flex-1 flex flex-col">
                 {p.genre && <p className="text-xs text-txt-muted mb-1">{p.genre}</p>}
                 <h3 className="text-base font-semibold text-txt-primary leading-snug">{p.title}</h3>
+                {p.organization_id && <button className="text-xs text-emerald-500 mt-2" disabled={!companies.has(p.organization_id)} onClick={() => navigate('/company/' + companies.get(p.organization_id!)!.slug)}>{companies.get(p.organization_id)?.name || 'Компания'}</button>}
                 {p.logline && (
                   <p className="mt-2 text-sm text-txt-secondary leading-relaxed line-clamp-3">{p.logline}</p>
                 )}

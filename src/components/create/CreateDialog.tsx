@@ -238,8 +238,17 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
       return;
     }
 
+    // The legacy Pulse is person-owned and publicly readable. Do not emit a
+    // company/private-business title under the employee's personal identity.
+    // Company events need their own visibility-aware publication path.
+    if (publisher) {
+      setSaving(false);
+      onCreated(kind, data.id as string);
+      return;
+    }
     if (kind === 'listing') {
       await addPulse({
+        userId: user.id,
         kind: 'marketplace',
         person: personName,
         action: mode === 'Услуги' ? 'предлагает услугу' : `разместил${mode === 'Аренда' ? ' в аренду' : ' на продажу'}`,
@@ -248,6 +257,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
       });
     } else if (kind === 'work') {
       await addPulse({
+        userId: user.id,
         kind: target === 'crew' ? 'crew-search' : 'spots',
         person: personName,
         action: target === 'crew'
@@ -258,6 +268,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
       });
     } else {
       await addPulse({
+        userId: user.id,
         kind: 'role',
         person: personName,
         action: 'открыл проект',

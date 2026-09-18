@@ -9,6 +9,7 @@ const OrganizationContext = createContext<Context>({ organizations: [], membersh
 export function useOrganization() { return useContext(OrganizationContext); }
 export function OrganizationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const userId = user?.id;
   const [selectedId, setSelectedId] = useState('');
   const [result, setResult] = useState<{ userId: string; organizations: Organization[]; memberships: Membership[]; permissions: { role_key: string; permission: string }[] } | null>(null);
   const [error, setError] = useState('');
@@ -17,22 +18,22 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let stale = false;
     setResult(null); setSelectedId(''); setError('');
-    if (!user) { setLoading(false); return; }
+    if (!userId) { setLoading(false); return; }
     setLoading(true);
     void (async () => {
       try {
         const [companies, members, permissions] = await Promise.all([
           supabase.from('organizations').select('id,name,slug,organization_type,city,description,visibility,search_engine_indexable,website').order('name').limit(100),
-          supabase.from('organization_members').select('organization_id,role,public_visible').eq('user_id', user.id).eq('active', true).limit(100),
+          supabase.from('organization_members').select('organization_id,role,public_visible').eq('user_id', userId).eq('active', true).limit(100),
           supabase.from('organization_role_permissions').select('role_key,permission'),
         ]);
         if (companies.error || members.error || permissions.error) throw new Error('load');
-        if (!stale) setResult({ userId: user.id, organizations: companies.data || [], memberships: members.data || [], permissions: permissions.data || [] });
+        if (!stale) setResult({ userId, organizations: companies.data || [], memberships: members.data || [], permissions: permissions.data || [] });
       } catch { if (!stale) setError('Компании недоступны. Не удалось проверить права.'); }
       finally { if (!stale) setLoading(false); }
     })();
     return () => { stale = true; };
-  }, [user, revision]);
+  }, [userId, revision]);
   const current = result?.userId === user?.id ? result : null;
   const organizations = current?.organizations || [];
   const selected = organizations.find(o => o.id === selectedId) || null;

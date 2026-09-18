@@ -4,6 +4,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useOrganization } from '../hooks/useOrganization';
+import { useCompanyCards } from '../hooks/useCompanyCards';
 import { useRouter } from '../router';
 import { ShareButton, Badge, Avatar } from '../components/ui';
 import { MessageButton } from '../components/MessageButton';
@@ -21,12 +23,14 @@ function daysAgo(iso: string) {
 }
 
 export function WorkPage() {
+  const organization = useOrganization();
   const { user } = useAuth();
   const { promptGuest } = useAuthModal();
   const { navigate } = useRouter();
   const [showCreate, setShowCreate] = useState(false);
 
   const [items, setItems] = useState<WorkOpportunity[]>([]);
+  const { companies, error: companyError } = useCompanyCards(items);
   const [authors, setAuthors] = useState<Map<string, AuthorLite>>(new Map());
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +58,7 @@ export function WorkPage() {
     const rows = (data || []) as WorkOpportunity[];
     setItems(rows);
 
-    const ids = [...new Set(rows.map((r) => r.user_id))];
+    const ids = [...new Set(rows.filter(r => !r.organization_id && r.user_id).map((r) => r.user_id))];
     if (ids.length > 0) {
       const { data: profs } = await supabase
         .from('profiles')
@@ -106,7 +110,8 @@ export function WorkPage() {
   }, [items, query, audience, deptId, city]);
 
   const selected = items.find((i) => i.id === selectedId) || null;
-  const selectedAuthor = selected ? authors.get(selected.user_id) || null : null;
+  const selectedAuthor = selected && !selected.organization_id ? authors.get(selected.user_id) || null : null;
+  const selectedCompany = selected?.organization_id ? companies.get(selected.organization_id) : null;
 
   const removeOwn = async (id: string) => {
     const { data } = await supabase.from('work_opportunities').delete().eq('id', id).select('id');
@@ -176,7 +181,7 @@ export function WorkPage() {
                 variant="primary"
               />
             )}
-            {user?.id === selected.user_id && (
+            {(selected.organization_id ? organization.can('publish_jobs', selected.organization_id) : user?.id === selected.user_id) && (
               <button onClick={() => removeOwn(selected.id)} className="btn-secondary">
                 <Trash2 className="h-4 w-4" /> Снять с публикации
               </button>
@@ -184,6 +189,7 @@ export function WorkPage() {
           </div>
         </div>
 
+        {selected?.organization_id && <div className="surface p-5"><p className="text-xs text-txt-muted">Работодатель — компания</p>{selectedCompany ? <button className="text-emerald-500 mt-2" onClick={() => navigate('/company/' + selectedCompany.slug)}>{selectedCompany.name}</button> : <p>{companyError ? 'Не удалось загрузить компанию.' : 'Компания'}</p>}</div>}
         {selectedAuthor && (
           <div className="surface p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-txt-muted mb-3">Кто ищет</p>
@@ -305,7 +311,7 @@ export function WorkPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {visible.map((w) => {
-            const author = authors.get(w.user_id);
+            const author = w.organization_id ? null : authors.get(w.user_id);
             return (
               <button
                 key={w.id}
@@ -327,6 +333,7 @@ export function WorkPage() {
                   <p className="flex items-center gap-1.5"><Wallet className="h-3.5 w-3.5 text-txt-muted" />{w.pay || 'По договорённости'}</p>
                 </div>
 
+                {w.organization_id && <p className="text-xs text-emerald-500 mt-2">{companies.get(w.organization_id)?.name || 'Компания'}</p>}
                 {author && (
                   <p className="mt-3 pt-3 border-t border-line-soft text-xs text-txt-muted truncate">
                     {author.name}

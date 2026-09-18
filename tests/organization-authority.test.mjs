@@ -155,10 +155,12 @@ test('organization identity: replay, consent, invitation and adversarial authori
    await q("INSERT INTO profile_privacy_settings(profile_visibility,message_permission,invite_permission) VALUES('private','none','members')");
    await q("INSERT INTO actors(user_id,full_name) VALUES($1,'Private Actor')",[c]);
    await q("INSERT INTO profile_contacts(kind,value) VALUES('phone','private phone')");
+   await q("INSERT INTO pulse_feed(user_id,kind,person,action) VALUES($1,'role','Private Actor','private activity')",[c]);
    await as(a);const work=await scalar("INSERT INTO work_opportunities(title,type,audience) VALUES('Casting','casting','actor') RETURNING id");
    assert.equal(await scalar('SELECT person_public($1)',['test-'+c]),null);
    assert.equal((await q('SELECT id FROM profiles WHERE id=$1',[c])).length,0);
    assert.equal((await q('SELECT id FROM actors WHERE user_id=$1',[c])).length,0);
+   assert.equal((await q('SELECT id FROM pulse_feed WHERE user_id=$1',[c])).length,0);
    await denied('SELECT get_or_create_direct_chat($1)',[c]);
    await as(c);const application=await scalar('INSERT INTO work_applications(work_id) VALUES($1) RETURNING id',[work]);
    const path=c+'/self-tape.mp4';
