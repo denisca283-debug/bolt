@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
 import { X, Mail, Lock, User, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRouter } from '../router';
@@ -37,13 +37,11 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [emailConfirmSent, setEmailConfirmSent] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Close modal via useEffect when auth state flips to authenticated
   useEffect(() => {
     if (isAuthenticated && open) {
       setOpen(false);
-      setPassword('');
       setError(null);
       setLoading(false);
       setGuestMessage(null);
@@ -84,42 +82,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
     setGuestMessage(null);
     setError(null);
     setLoading(false);
-    setPassword('');
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const dialog = dialogRef.current;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]'
-    ) || []).filter((element) => element.getClientRects().length > 0);
-    (dialog?.querySelector<HTMLElement>('input') || focusable()[0] || dialog)?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        closeAuth();
-      }
-      if (event.key === 'Tab') {
-        const elements = focusable();
-        const first = elements[0];
-        const last = elements[elements.length - 1];
-        if (!first) { event.preventDefault(); dialog?.focus(); return; }
-        if (!dialog?.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
-          event.preventDefault();
-          (event.shiftKey ? last : first).focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault(); first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, [open, closeAuth]);
 
   const switchMode = (m: AuthMode) => {
     setMode(m);
@@ -202,7 +165,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fade-in">
           <div className="absolute inset-0 bg-base-950/70 backdrop-blur-sm" onClick={closeAuth} />
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title || 'Вход в FilmVerse'} tabIndex={-1} className="relative w-full max-w-sm surface p-6 animate-scale-in">
+          <div className="relative w-full max-w-sm surface p-6 animate-scale-in">
             <button
               onClick={closeAuth}
               className="absolute top-3 right-3 text-txt-muted hover:text-txt-primary transition-colors"
