@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage';
 import { ActorsPage } from './pages/ActorsPage';
 import { ActorProfilePage } from './pages/ActorProfilePage';
 import { WorkPage } from './pages/WorkPage';
+import { ResumesPage } from './pages/ResumesPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { MessagesPage } from './pages/MessagesPage';
 import { MarketplacePage } from './pages/MarketplacePage';
@@ -73,6 +74,10 @@ function PageRouter() {
       return <ProfessionalsPage />;
     case '/work':
       return <WorkPage />;
+    case '/resumes':
+      return <ResumesPage key="resumes" />;
+    case '/resumes/new':
+      return <ResumesPage key="new-resume" create />;
     case '/projects':
       return <ProjectsPage />;
     case '/messages':

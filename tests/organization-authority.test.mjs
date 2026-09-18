@@ -171,5 +171,42 @@ test('organization identity: replay, consent, invitation and adversarial authori
    assert.equal((await scalar('SELECT actor_directory()')).some(row=>row.user_id===c),false);
    assert.equal((await scalar('SELECT person_recipients()')).some(row=>row.id===c),false);
   });
+  await t.test('Resume publication is atomic, idempotent and cannot self-grant or spend twice',async()=>{
+   await as(d);
+   const resume=await scalar("INSERT INTO profile_publications(headline) VALUES('Looking for work') RETURNING id");
+   const second=await scalar("INSERT INTO profile_publications(headline) VALUES('Another resume') RETURNING id");
+   const request=crypto.randomUUID();
+   await denied('SELECT resume_publish($1,$2)',[resume,request]);
+   assert.equal(await scalar('SELECT status FROM profile_publications WHERE id=$1',[resume]),'draft');
+   await denied("UPDATE profile_publications SET status='active' WHERE id=$1",[resume]);
+   await denied("INSERT INTO resume_entitlement_receipts(publication_id,user_id,entitlement_id,kind) VALUES($1,$2,$3,'pro')",[resume,d,crypto.randomUUID()]);
+   await db.exec('RESET ROLE');
+   const grant=await scalar("INSERT INTO account_entitlements(user_id,entitlement_code,source,remaining_uses) VALUES($1,'resume_publication','test',1) RETURNING id",[d]);
+   await as(d);assert.equal(await scalar('SELECT resume_publish($1,$2)',[resume,request]),resume);
+   assert.equal(await scalar('SELECT resume_publish($1,$2)',[resume,request]),resume);
+   await assert.rejects(q('SELECT resume_publish($1,$2)',[second,request]),e=>e.code==='22023');
+   await denied('SELECT resume_publish($1,$2)',[second,crypto.randomUUID()]);
+   await q("SELECT resume_transition($1,'paused')",[resume]);
+   await q('SELECT resume_publish($1,$2)',[resume,crypto.randomUUID()]);
+   await db.exec('RESET ROLE');assert.equal(await scalar('SELECT remaining_uses FROM account_entitlements WHERE id=$1',[grant]),0);
+   await as(a);await denied('SELECT resume_publish($1,$2)',[resume,crypto.randomUUID()]);
+   await denied("SELECT resume_transition($1,'closed')",[resume]);
+   await as(null,'anon');assert.equal(await scalar('SELECT count(*)::int FROM resume_publications WHERE id=$1',[resume]),1);
+   await db.exec('RESET ROLE');await q("UPDATE account_entitlements SET status='revoked' WHERE id=$1",[grant]);
+   await as(null,'anon');assert.equal(await scalar('SELECT count(*)::int FROM resume_publications WHERE id=$1',[resume]),0);
+   await as(d);assert.equal(await scalar('SELECT status FROM resume_publications WHERE id=$1',[resume]),'expired');
+  });
+  await t.test('PRO publication does not consume a one-time use; invalid draft rolls back',async()=>{
+   await db.exec('RESET ROLE');
+   const grant=await scalar("INSERT INTO account_entitlements(user_id,entitlement_code,source,remaining_uses) VALUES($1,'resume_publication','test',1) RETURNING id",[a]);
+   await q("INSERT INTO account_entitlements(user_id,entitlement_code,source) VALUES($1,'pro','test')",[a]);
+   await as(a);const resume=await scalar("INSERT INTO profile_publications(headline,desired_profession_ids) VALUES('Invalid profession',ARRAY[$1::uuid]) RETURNING id",[crypto.randomUUID()]);
+   await assert.rejects(q('SELECT resume_publish($1,$2)',[resume,crypto.randomUUID()]),e=>e.code==='22023');
+   assert.equal(await scalar('SELECT status FROM profile_publications WHERE id=$1',[resume]),'draft');
+   await q("UPDATE profile_publications SET desired_profession_ids='{}' WHERE id=$1",[resume]);
+   await q('SELECT resume_publish($1,$2)',[resume,crypto.randomUUID()]);
+   await db.exec('RESET ROLE');assert.equal(await scalar('SELECT remaining_uses FROM account_entitlements WHERE id=$1',[grant]),1);
+   assert.equal(await scalar('SELECT kind FROM resume_entitlement_receipts WHERE publication_id=$1',[resume]),'pro');
+  });
  }finally{await db.close();}
 });

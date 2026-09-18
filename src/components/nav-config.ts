@@ -36,4 +36,5 @@ export const PRIVATE_ROUTES = new Set<string>([
   '/settings',
   '/profile',
   '/onboarding',
+  '/resumes',
 ]);

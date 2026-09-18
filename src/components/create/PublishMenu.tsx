@@ -41,7 +41,7 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
 
   const pickResume = () => {
     setPickerOpen(false);
-    navigate('/profile');
+    navigate('/resumes/new');
   };
 
   return (
