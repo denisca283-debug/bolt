@@ -148,6 +148,9 @@ export type WorkOpportunity = {
   shoot_date: string | null;
   age_range: string | null;
   genre: string | null;
+  /** Added by migration 011 — which profession the vacancy is actually for. */
+  department_id?: string | null;
+  profession_id?: string | null;
   pay: string | null;
   spots_total: number | null;
   spots_left: number | null;

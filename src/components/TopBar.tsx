@@ -1,18 +1,23 @@
-import { useState } from 'react';
-import { Search, Plus, Bell, Menu, LogIn, UserPlus } from 'lucide-react';
+import { Search, Bell, Menu, LogIn, UserPlus } from 'lucide-react';
 import { useRouter } from '../router';
 import { Avatar, IconButton } from './ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from './AuthModal';
-import { CreateDialog } from './create/CreateDialog';
+import { PublishMenu } from './create/PublishMenu';
 
 type TopBarProps = {
   onMenuClick: () => void;
 };
 
+/**
+ * Sections that carry their own primary "Разместить" button. The global one in
+ * the bar steps aside there, so the same action never appears twice on screen.
+ */
+const SECTIONS_WITH_OWN_PUBLISH = ['/marketplace', '/work', '/projects'];
+
 export function TopBar({ onMenuClick }: TopBarProps) {
-  const { navigate } = useRouter();
-  const [showCreate, setShowCreate] = useState(false);
+  const { navigate, path } = useRouter();
+  const ownPublishHere = SECTIONS_WITH_OWN_PUBLISH.some((p) => path === p || path.startsWith(`${p}/`));
   const { profile, user, isAuthenticated, hasBeenAuthenticated } = useAuth();
   const { openLogin, openRegister } = useAuthModal();
   // Keep showing the authenticated chrome during a transient session gap
@@ -49,17 +54,16 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
       {showAuthedUI ? (
         <>
-          {/* Quick action — opens the publish dialog, not just another page */}
-          <button
-            onClick={() => setShowCreate(true)}
-            className="btn-primary hidden sm:inline-flex"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Разместить</span>
-          </button>
-          <button onClick={() => setShowCreate(true)} className="btn-primary sm:hidden !px-2.5" aria-label="Разместить">
-            <Plus className="h-4 w-4" />
-          </button>
+          {/* Quick action — a named menu, and only where the page has none */}
+          {!ownPublishHere && (
+            <PublishMenu
+              onCreated={(kind, id) => {
+                if (kind === 'listing') navigate(`/listing/${id}`);
+                else if (kind === 'work') navigate('/work');
+                else navigate('/projects');
+              }}
+            />
+          )}
 
           {/* Notifications */}
           <div className="relative">
@@ -95,18 +99,6 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             <span>Регистрация</span>
           </button>
         </div>
-      )}
-
-      {showCreate && (
-        <CreateDialog
-          onClose={() => setShowCreate(false)}
-          onCreated={(kind, id) => {
-            setShowCreate(false);
-            if (kind === 'listing') navigate(`/listing/${id}`);
-            else if (kind === 'work') navigate('/work');
-            else navigate('/projects');
-          }}
-        />
       )}
     </header>
   );

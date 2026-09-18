@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Loader2, ImagePlus, ShoppingBag, Briefcase, Clapperboard, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import { addPulse } from '../../lib/pulse';
 import { CityInput } from '../CityInput';
+import type { Department, Profession } from '../../types';
 
 export type CreateKind = 'listing' | 'work' | 'project';
 
@@ -22,8 +23,20 @@ const KINDS: { kind: CreateKind; label: string; hint: string; icon: typeof Shopp
 
 const LISTING_MODES = ['Аренда', 'Продажа', 'Услуги'];
 const LISTING_CATEGORIES = ['Камеры', 'Оптика', 'Свет', 'Звук', 'Грип', 'Транспорт', 'Реквизит', 'Костюмы', 'Локации', 'Услуги', 'Другое'];
-const WORK_TYPES = ['Роль', 'Массовка', 'Съёмочная группа', 'Реклама', 'Клип', 'Фотосъёмка', 'Другое'];
-const WORK_AUDIENCES = ['Актёры', 'Специалисты', 'Все'];
+/**
+ * Who the job is for. This is the first question an employer answers, because
+ * it decides everything else on the form — an actor is cast by role, a crew
+ * member is hired by profession.
+ */
+const WORK_TARGETS = [
+  { key: 'actor', audience: 'Актёры', label: 'Актёра', hint: 'Роль в проекте' },
+  { key: 'crew', audience: 'Специалисты', label: 'Специалиста', hint: 'Человека в группу' },
+  { key: 'extra', audience: 'Актёры', label: 'Массовку', hint: 'Людей на смену' },
+] as const;
+
+type WorkTarget = (typeof WORK_TARGETS)[number]['key'];
+
+const ROLE_TYPES = ['Главная роль', 'Вторая роль', 'Эпизод', 'Реклама', 'Клип', 'Фотосъёмка'];
 const PROJECT_STAGES = ['Разработка', 'Препродакшн', 'Съёмки', 'Постпродакшн', 'Завершён'];
 const PROJECT_GENRES = ['Драма', 'Комедия', 'Триллер', 'Документальный', 'Реклама', 'Клип', 'Короткий метр', 'Сериал', 'Другое'];
 
@@ -60,8 +73,12 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
   const [price, setPrice] = useState('');
 
   // Work
-  const [workType, setWorkType] = useState('Роль');
-  const [audience, setAudience] = useState('Актёры');
+  const [target, setTarget] = useState<WorkTarget>('actor');
+  const [roleType, setRoleType] = useState('Главная роль');
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [professions, setProfessions] = useState<Profession[]>([]);
+  const [deptId, setDeptId] = useState('');
+  const [profId, setProfId] = useState('');
   const [projectName, setProjectName] = useState('');
   const [shootDate, setShootDate] = useState('');
   const [ageRange, setAgeRange] = useState('');
@@ -76,6 +93,26 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
   const [teamSize, setTeamSize] = useState('');
 
   const personName = profile?.full_name || 'Пользователь FilmVerse';
+
+  // The profession taxonomy already lives in the database — a vacancy points
+  // at it instead of repeating it as free text, so "нужен 1AC" is searchable.
+  useEffect(() => {
+    if (kind !== 'work' || departments.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      const [deptRes, profRes] = await Promise.all([
+        supabase.from('departments').select('*').order('sort_order'),
+        supabase.from('professions').select('*').order('sort_order'),
+      ]);
+      if (cancelled) return;
+      if (deptRes.data) setDepartments(deptRes.data as Department[]);
+      if (profRes.data) setProfessions(profRes.data as Profession[]);
+    })();
+    return () => { cancelled = true; };
+  }, [kind, departments.length]);
+
+  const professionsInDept = deptId ? professions.filter((p) => p.department_id === deptId) : [];
+  const chosenProfession = professions.find((p) => p.id === profId) || null;
 
   // Photos go into the existing `avatars` bucket: its policy only requires the
   // first path segment to be the user's id, so no new bucket is needed.
@@ -103,7 +140,13 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
     setUploading(false);
   };
 
-  const canSubmit = title.trim().length > 1 && !saving && !uploading;
+  const canSubmit =
+    title.trim().length > 1 &&
+    !saving &&
+    !uploading &&
+    // A crew vacancy without a profession is exactly the "кто требуется?"
+    // gap this form exists to close.
+    (kind !== 'work' || target !== 'crew' || !!profId);
 
   const handleSubmit = async () => {
     if (!user) {
@@ -130,16 +173,21 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
       };
     } else if (kind === 'work') {
       const total = parseInt(spots, 10);
+      const targetDef = WORK_TARGETS.find((t) => t.key === target)!;
       table = 'work_opportunities';
       payload = {
         user_id: user.id,
         title: title.trim(),
-        type: workType,
-        audience,
+        type: target === 'crew' ? (chosenProfession?.name || 'Съёмочная группа')
+          : target === 'extra' ? 'Массовка'
+          : roleType,
+        audience: targetDef.audience,
+        department_id: target === 'crew' && deptId ? deptId : null,
+        profession_id: target === 'crew' && profId ? profId : null,
         project_name: projectName.trim() || null,
         city: city.trim() || null,
         shoot_date: shootDate.trim() || null,
-        age_range: ageRange.trim() || null,
+        age_range: target === 'crew' ? null : ageRange.trim() || null,
         genre: null,
         pay: pay.trim() || null,
         spots_total: Number.isFinite(total) ? total : null,
@@ -186,10 +234,12 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
       });
     } else if (kind === 'work') {
       await addPulse({
-        kind: audience === 'Специалисты' ? 'crew-search' : 'spots',
+        kind: target === 'crew' ? 'crew-search' : 'spots',
         person: personName,
-        action: 'ищет людей',
-        target: title.trim(),
+        action: target === 'crew'
+          ? `ищет в группу — ${chosenProfession?.name || 'специалиста'}`
+          : target === 'extra' ? 'набирает массовку' : 'ищет актёра',
+        target: projectName.trim() || title.trim(),
         photoUrl: profile?.avatar_url ?? null,
       });
     } else {
@@ -246,14 +296,18 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
         </div>
 
         <div className="space-y-4">
-          <Field label={kind === 'listing' ? 'Что размещаете' : kind === 'work' ? 'Кого ищете' : 'Название проекта'}>
+          <Field label={kind === 'listing' ? 'Что размещаете' : kind === 'work' ? 'Заголовок объявления' : 'Название проекта'}>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={
                 kind === 'listing' ? 'Например: ARRI Alexa Mini LF' :
-                kind === 'work' ? 'Например: Актриса 25–35 на главную роль' :
+                kind === 'work' ? (
+                  target === 'crew' ? 'Например: Второй оператор на сериал, 6 смен' :
+                  target === 'extra' ? 'Например: Массовка на вокзал, 40 человек' :
+                  'Например: Главная роль, женщина 25–35'
+                ) :
                 'Например: Тихая гавань'
               }
               className="input-field"
@@ -295,18 +349,72 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
           {/* ── Work ────────────────────────────────────────────── */}
           {kind === 'work' && (
             <>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Тип">
-                  <select value={workType} onChange={(e) => setWorkType(e.target.value)} className="input-field">
-                    {WORK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </Field>
-                <Field label="Кому показывать">
-                  <select value={audience} onChange={(e) => setAudience(e.target.value)} className="input-field">
-                    {WORK_AUDIENCES.map((a) => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </Field>
+              {/* Кто требуется — первый и главный вопрос */}
+              <div>
+                <label className="block text-xs font-medium text-txt-secondary mb-1.5">Кто требуется</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {WORK_TARGETS.map((t) => {
+                    const active = target === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setTarget(t.key)}
+                        className={`p-2.5 rounded-lg border text-left transition-all duration-200 ${
+                          active ? 'bg-emerald-200/25 border-emerald-400' : 'bg-surface-700 border-line-soft hover:border-line'
+                        }`}
+                      >
+                        <span className={`block text-xs font-medium ${active ? 'text-emerald-600' : 'text-txt-primary'}`}>
+                          {t.label}
+                        </span>
+                        <span className="block text-[11px] text-txt-muted leading-snug mt-0.5">{t.hint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+
+              {target === 'crew' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Департамент">
+                    <select
+                      value={deptId}
+                      onChange={(e) => { setDeptId(e.target.value); setProfId(''); }}
+                      className="input-field"
+                    >
+                      <option value="">Выберите департамент</option>
+                      {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Профессия">
+                    <select
+                      value={profId}
+                      onChange={(e) => setProfId(e.target.value)}
+                      className="input-field"
+                      disabled={!deptId}
+                    >
+                      <option value="">{deptId ? 'Выберите профессию' : 'Сначала департамент'}</option>
+                      {professionsInDept.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              ) : target === 'actor' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Тип роли">
+                    <select value={roleType} onChange={(e) => setRoleType(e.target.value)} className="input-field">
+                      {ROLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Возраст">
+                    <input type="text" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} placeholder="25–35" className="input-field" />
+                  </Field>
+                </div>
+              ) : (
+                <Field label="Возраст">
+                  <input type="text" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} placeholder="18–60 или «любой»" className="input-field" />
+                </Field>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Проект">
                   <input type="text" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Название проекта" className="input-field" />
@@ -319,16 +427,13 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
                 <Field label="Даты смен">
                   <input type="text" value={shootDate} onChange={(e) => setShootDate(e.target.value)} placeholder="12–14 июня" className="input-field" />
                 </Field>
-                <Field label="Возраст">
-                  <input type="text" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} placeholder="25–35" className="input-field" />
-                </Field>
                 <Field label="Мест">
                   <input type="number" min="1" value={spots} onChange={(e) => setSpots(e.target.value)} placeholder="1" className="input-field" />
                 </Field>
+                <Field label="Оплата">
+                  <input type="text" value={pay} onChange={(e) => setPay(e.target.value)} placeholder="5 000 ₽ / смена" className="input-field" />
+                </Field>
               </div>
-              <Field label="Оплата">
-                <input type="text" value={pay} onChange={(e) => setPay(e.target.value)} placeholder="5 000 ₽ / смена или «по договорённости»" className="input-field" />
-              </Field>
             </>
           )}
 

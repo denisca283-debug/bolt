@@ -1,153 +1,241 @@
-import { useState } from 'react';
-import { ChevronLeft } from 'lucide-react';
-import { workOpportunities, type WorkOpportunity } from '../data/mock';
-import { WorkCard } from '../components/WorkCard';
-import { ShareButton, Badge } from '../components/ui';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  ChevronLeft, Search, Plus, Loader2, MapPin, Calendar, Users, Wallet, Briefcase, Trash2,
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 import { useRouter } from '../router';
+import { ShareButton, Badge, Avatar } from '../components/ui';
+import { MessageButton } from '../components/MessageButton';
+import { PublishMenu } from '../components/create/PublishMenu';
+import type { WorkOpportunity, Department, AuthorLite } from '../types';
 
-const audienceFilters: ('Все' | WorkOpportunity['audience'])[] = ['Все', 'Актёрам', 'Массовка', 'Специалистам'];
+const AUDIENCES = ['Все', 'Актёрам', 'Специалистам'] as const;
 
-const typeFiltersByAudience: Record<string, string[]> = {
-  'Все': ['Все'],
-  'Актёрам': ['Все', 'Главная роль', 'Вторая роль', 'Эпизод', 'Реклама'],
-  'Массовка': ['Все'],
-  'Специалистам': ['Все', 'Оператор', 'Режиссёр', 'Художник', 'Звук', 'Свет', 'Грим', 'Костюм', 'Монтаж', 'Продакшн'],
-};
+function daysAgo(iso: string) {
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (d <= 0) return 'сегодня';
+  if (d === 1) return 'вчера';
+  return `${d} дн. назад`;
+}
 
 export function WorkPage() {
+  const { user } = useAuth();
   const { navigate } = useRouter();
-  const [audience, setAudience] = useState<'Все' | WorkOpportunity['audience']>('Все');
-  const [typeFilter, setTypeFilter] = useState('Все');
-  const [selected, setSelected] = useState<WorkOpportunity | null>(null);
 
-  const filtered = workOpportunities.filter((w) => {
-    if (audience !== 'Все' && w.audience !== audience) return false;
-    if (typeFilter !== 'Все' && w.type !== typeFilter) return false;
-    return true;
-  });
+  const [items, setItems] = useState<WorkOpportunity[]>([]);
+  const [authors, setAuthors] = useState<Map<string, AuthorLite>>(new Map());
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [schemaMissing, setSchemaMissing] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const currentTypeFilters = typeFiltersByAudience[audience] || ['Все'];
+  const [query, setQuery] = useState('');
+  const [audience, setAudience] = useState<(typeof AUDIENCES)[number]>('Все');
+  const [deptId, setDeptId] = useState('Все');
+  const [city, setCity] = useState('Все');
 
-  const handleAudienceChange = (newAudience: 'Все' | WorkOpportunity['audience']) => {
-    setAudience(newAudience);
-    setTypeFilter('Все');
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('work_opportunities')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(300);
+
+    if (error) {
+      setSchemaMissing(true);
+      setLoading(false);
+      return;
+    }
+    setSchemaMissing(false);
+    const rows = (data || []) as WorkOpportunity[];
+    setItems(rows);
+
+    const ids = [...new Set(rows.map((r) => r.user_id))];
+    if (ids.length > 0) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, full_name, public_slug, avatar_url, city')
+        .in('id', ids);
+      setAuthors(new Map(
+        ((profs || []) as { id: string; full_name: string | null; public_slug: string | null; avatar_url: string | null; city: string | null }[])
+          .map((p) => [p.id, {
+            id: p.id,
+            name: p.full_name || 'Пользователь FilmVerse',
+            slug: p.public_slug,
+            avatarUrl: p.avatar_url,
+            city: p.city,
+          }])
+      ));
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('departments').select('*').order('sort_order');
+      if (!cancelled && data) setDepartments(data as Department[]);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const cities = useMemo(() => {
+    const set = new Set(items.map((i) => i.city).filter(Boolean) as string[]);
+    return ['Все', ...[...set].sort((a, b) => a.localeCompare(b, 'ru'))];
+  }, [items]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter((w) => {
+      if (audience === 'Актёрам' && w.audience !== 'Актёры') return false;
+      if (audience === 'Специалистам' && w.audience !== 'Специалисты') return false;
+      if (deptId !== 'Все' && w.department_id !== deptId) return false;
+      if (city !== 'Все' && w.city !== city) return false;
+      if (q) {
+        const hay = `${w.title} ${w.type} ${w.project_name || ''} ${w.description || ''} ${w.city || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [items, query, audience, deptId, city]);
+
+  const selected = items.find((i) => i.id === selectedId) || null;
+  const selectedAuthor = selected ? authors.get(selected.user_id) || null : null;
+
+  const removeOwn = async (id: string) => {
+    const { data } = await supabase.from('work_opportunities').delete().eq('id', id).select('id');
+    if (data && data.length > 0) {
+      setSelectedId(null);
+      load();
+    }
   };
 
+  // ── Detail ────────────────────────────────────────────────────────
   if (selected) {
+    const meta = [
+      { icon: MapPin, label: 'Город', value: selected.city || '—' },
+      { icon: Calendar, label: 'Смены', value: selected.shoot_date || '—' },
+      { icon: Users, label: 'Мест', value: selected.spots_total ? String(selected.spots_total) : '—' },
+      { icon: Wallet, label: 'Оплата', value: selected.pay || 'По договорённости' },
+    ];
+
     return (
       <div className="animate-fade-in max-w-3xl">
         <button
-          onClick={() => setSelected(null)}
-          className="mb-5 inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-900 transition-colors"
+          onClick={() => setSelectedId(null)}
+          className="mb-5 inline-flex items-center gap-1.5 text-sm text-txt-secondary hover:text-txt-primary transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
           К списку работ
         </button>
 
-        {/* Detail header */}
-        <div className="surface p-6 mb-6">
+        <div className="surface p-6 mb-5">
           <div className="flex items-center justify-between mb-3">
-            <Badge variant="dark">{selected.type}</Badge>
+            <Badge variant="fern">{selected.type}</Badge>
             <ShareButton />
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl font-semibold text-ink-900 tracking-tight">
+          <h1 className="font-display text-2xl sm:text-3xl font-semibold text-txt-primary tracking-tight">
             {selected.title}
           </h1>
-          <p className="mt-2 text-sm text-ink-500">Проект: {selected.project}</p>
+          {selected.project_name && (
+            <p className="mt-2 text-sm text-txt-secondary">Проект: {selected.project_name}</p>
+          )}
+          {selected.age_range && (
+            <p className="mt-1 text-sm text-txt-secondary">Возраст: {selected.age_range}</p>
+          )}
 
-          {/* Meta */}
-          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-4 py-5 border-y border-stone-300/50">
-            {[
-              { label: 'Город', value: selected.city },
-              { label: 'Дата', value: selected.date },
-              { label: selected.audience === 'Специалистам' ? 'Опыт' : 'Возраст', value: selected.ageRange },
-              { label: 'Оплата', value: selected.pay },
-            ].map((d) => (
-              <div key={d.label}>
-                <p className="text-xs text-ink-400 mb-0.5">{d.label}</p>
-                <p className="text-sm font-medium text-ink-900">{d.value}</p>
+          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-4 py-5 border-y border-line-soft">
+            {meta.map((m) => (
+              <div key={m.label}>
+                <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-txt-muted">
+                  <m.icon className="h-3.5 w-3.5" /> {m.label}
+                </p>
+                <p className="mt-1 text-sm text-txt-primary">{m.value}</p>
               </div>
             ))}
           </div>
 
-          {/* Description */}
-          <div className="mt-5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-ink-400 mb-2">Описание</p>
-            <p className="text-sm text-ink-600 leading-relaxed">{selected.description}</p>
-          </div>
-
-          {/* Spots */}
-          {selected.spotsLeft !== undefined && (
-            <div className="mt-5 pt-5 border-t border-stone-300/50">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-ink-600">Свободные места</span>
-                <span className="text-sm font-semibold text-fern-700">
-                  {selected.spotsLeft} из {selected.spots}
-                </span>
-              </div>
-              <div className="h-2 bg-paper-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-fern-500 rounded-full"
-                  style={{ width: `${((selected.spots! - selected.spotsLeft) / selected.spots!) * 100}%` }}
-                />
-              </div>
-            </div>
+          {selected.description && (
+            <p className="mt-5 text-sm text-txt-secondary leading-relaxed whitespace-pre-line">
+              {selected.description}
+            </p>
           )}
 
-          {/* Actions */}
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button onClick={() => navigate('/messages')} className="btn-primary flex-1">
-              Откликнуться
+          <div className="mt-6 flex flex-wrap gap-2">
+            {selectedAuthor && user?.id !== selected.user_id && (
+              <MessageButton
+                targetUserId={selectedAuthor.id}
+                targetName={selectedAuthor.name}
+                label="Откликнуться"
+                variant="primary"
+              />
+            )}
+            {user?.id === selected.user_id && (
+              <button onClick={() => removeOwn(selected.id)} className="btn-secondary">
+                <Trash2 className="h-4 w-4" /> Снять с публикации
+              </button>
+            )}
+          </div>
+        </div>
+
+        {selectedAuthor && (
+          <div className="surface p-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-txt-muted mb-3">Кто ищет</p>
+            <button
+              onClick={() => selectedAuthor.slug && navigate(`/u/${selectedAuthor.slug}`)}
+              disabled={!selectedAuthor.slug}
+              className="flex items-center gap-3 text-left disabled:cursor-default"
+            >
+              {selectedAuthor.avatarUrl ? (
+                <img src={selectedAuthor.avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" />
+              ) : (
+                <Avatar initials={selectedAuthor.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()} />
+              )}
+              <div>
+                <p className="text-sm font-medium text-txt-primary">{selectedAuthor.name}</p>
+                {selectedAuthor.city && <p className="text-xs text-txt-muted">{selectedAuthor.city}</p>}
+              </div>
             </button>
-            <ShareButton className="btn-secondary" />
           </div>
-
-          <p className="mt-3 text-xs text-ink-400">
-            {selected.applicants} откликов · Размещено {selected.postedDaysAgo} дн. назад
-          </p>
-        </div>
-
-        {/* Shareable card */}
-        <div className="surface-stone p-6">
-          <p className="text-xs text-paper-400 mb-3">Карточка для отправки коллегам</p>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <span className="chip bg-fern-600 text-white">
-                {selected.audience === 'Специалистам' ? 'ИЩУТ СПЕЦИАЛИСТА' : 'ИЩУТ АКТЁРОВ'}
-              </span>
-              <h3 className="mt-2 font-display text-lg font-semibold text-paper-50">{selected.project}</h3>
-              <p className="text-sm text-paper-300 mt-1">{selected.city} · {selected.ageRange}</p>
-              <p className="text-sm text-paper-300">{selected.pay}</p>
-            </div>
-            <ShareButton dark />
-          </div>
-        </div>
+        )}
       </div>
     );
   }
 
+  // ── List ──────────────────────────────────────────────────────────
   return (
     <div className="animate-fade-in">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="font-display text-3xl sm:text-4xl font-semibold text-ink-900 tracking-tight">
-          Работа в кино
-        </h1>
-        <p className="mt-2 text-base text-ink-500">
-          {filtered.length} свежих возможностей — роли, массовка, специалисты
-        </p>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl sm:text-4xl font-semibold text-txt-primary tracking-tight">Работа</h1>
+          <p className="mt-2 text-base text-txt-secondary">Роли, смены и места в съёмочных группах</p>
+        </div>
+        <PublishMenu onCreated={(kind, id) => { if (kind === 'listing') navigate(`/listing/${id}`); else load(); }} />
       </div>
 
-      {/* Audience filter tabs */}
-      <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
-        {audienceFilters.map((a) => (
+      <div className="relative mb-4">
+        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-txt-muted" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Роль, профессия, проект…"
+          className="input-field pl-10"
+        />
+      </div>
+
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        {AUDIENCES.map((a) => (
           <button
             key={a}
-            onClick={() => handleAudienceChange(a)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold border whitespace-nowrap transition-all duration-200 ${
+            onClick={() => { setAudience(a); if (a !== 'Специалистам') setDeptId('Все'); }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200 ${
               audience === a
-                ? 'bg-stone-800 text-paper-100 border-stone-800'
-                : 'bg-white text-ink-600 border-stone-300 hover:border-stone-400'
+                ? 'bg-emerald-500 text-white border-emerald-500'
+                : 'bg-surface-600 text-txt-secondary border-line-soft hover:border-line'
             }`}
           >
             {a}
@@ -155,38 +243,84 @@ export function WorkPage() {
         ))}
       </div>
 
-      {/* Type sub-filters */}
-      {currentTypeFilters.length > 1 && (
-        <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-1">
-          {currentTypeFilters.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(t)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium border whitespace-nowrap transition-all duration-200 ${
-                typeFilter === t
-                  ? 'bg-fern-600 text-white border-fern-600'
-                  : 'bg-paper-100 text-ink-500 border-stone-300/60 hover:border-stone-400'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="mb-6 flex items-center gap-2 flex-wrap">
+        {audience === 'Специалистам' && (
+          <select value={deptId} onChange={(e) => setDeptId(e.target.value)} className="input-field !py-2 !w-auto text-sm">
+            <option value="Все">Все департаменты</option>
+            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        )}
+        <select value={city} onChange={(e) => setCity(e.target.value)} className="input-field !py-2 !w-auto text-sm">
+          {cities.map((c) => <option key={c} value={c}>{c === 'Все' ? 'Все города' : c}</option>)}
+        </select>
+        <span className="ml-auto text-sm text-txt-muted">
+          {loading ? '' : `${visible.length} ${visible.length === 1 ? 'объявление' : 'объявлений'}`}
+        </span>
+      </div>
 
-      {/* Cards */}
-      {filtered.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
-          {filtered.map((w) => (
-            <div key={w.id} onClick={() => setSelected(w)}>
-              <WorkCard opportunity={w} />
-            </div>
-          ))}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-6 w-6 text-emerald-500 animate-spin" />
+        </div>
+      ) : schemaMissing ? (
+        <div className="surface p-6 max-w-lg">
+          <h2 className="text-sm font-semibold text-txt-primary mb-1">База ещё не обновлена</h2>
+          <p className="text-sm text-txt-secondary leading-relaxed">
+            Разделу «Работа» нужна таблица <span className="text-txt-primary">work_opportunities</span>.
+            Выполните миграцию <span className="text-txt-primary">008_content_tables</span>.
+          </p>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="surface p-12 text-center">
+          <Briefcase className="h-8 w-8 text-txt-muted mx-auto mb-4" strokeWidth={1.5} />
+          {items.length === 0 ? (
+            <>
+              <p className="text-txt-primary text-lg font-medium">Пока никто не ищет людей</p>
+              <p className="text-txt-secondary text-sm mt-2 max-w-md mx-auto leading-relaxed">
+                Разместите первую вакансию — роль, смену массовки или место в группе.
+                Её увидят все, включая незарегистрированных.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-txt-primary text-lg font-medium">Ничего не найдено</p>
+              <p className="text-txt-secondary text-sm mt-1">Попробуйте изменить фильтры</p>
+            </>
+          )}
         </div>
       ) : (
-        <div className="text-center py-20">
-          <p className="text-ink-500 text-lg">Пока нет возможностей в этой категории</p>
-          <p className="text-ink-400 text-sm mt-1">Попробуйте другую категорию</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {visible.map((w) => {
+            const author = authors.get(w.user_id);
+            return (
+              <button
+                key={w.id}
+                onClick={() => setSelectedId(w.id)}
+                className="group surface p-5 text-left hover:border-line-strong transition-all duration-300 animate-fade-up flex flex-col"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="chip chip-fern">{w.type}</span>
+                  <span className="text-[11px] text-txt-muted">{daysAgo(w.created_at)}</span>
+                </div>
+                <h3 className="text-base font-semibold text-txt-primary leading-snug group-hover:text-emerald-600 transition-colors">
+                  {w.title}
+                </h3>
+                {w.project_name && <p className="mt-1 text-xs text-txt-muted">{w.project_name}</p>}
+
+                <div className="mt-3 space-y-1.5 text-xs text-txt-secondary">
+                  <p className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-txt-muted" />{w.city || 'Город не указан'}</p>
+                  {w.shoot_date && <p className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 text-txt-muted" />{w.shoot_date}</p>}
+                  <p className="flex items-center gap-1.5"><Wallet className="h-3.5 w-3.5 text-txt-muted" />{w.pay || 'По договорённости'}</p>
+                </div>
+
+                {author && (
+                  <p className="mt-3 pt-3 border-t border-line-soft text-xs text-txt-muted truncate">
+                    {author.name}
+                  </p>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

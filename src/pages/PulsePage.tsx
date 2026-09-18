@@ -1,12 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Award, Search, Users, Camera, CheckCircle2, Briefcase, FileImage, Activity, Loader2, Plus,
+  Award, Search, Users, Camera, CheckCircle2, Briefcase, FileImage, Activity, Loader2,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../hooks/useAuth';
-import { useAuthModal } from '../components/AuthModal';
-import { CreateDialog } from '../components/create/CreateDialog';
-import { useRouter } from '../router';
 import type { PulseEntry } from '../types';
 
 const KIND_CONFIG: Record<string, { icon: typeof Award; label: string; color: string }> = {
@@ -33,14 +29,9 @@ function timeAgo(iso: string) {
 }
 
 export function PulsePage() {
-  const { user } = useAuth();
-  const { promptGuest } = useAuthModal();
-  const { navigate } = useRouter();
-
   const [items, setItems] = useState<PulseEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
@@ -61,28 +52,15 @@ export function PulsePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openCreate = () => {
-    if (!user) {
-      promptGuest({ message: 'Чтобы опубликовать что-то в FilmVerse, войдите или создайте аккаунт.' });
-      return;
-    }
-    setShowCreate(true);
-  };
-
   return (
     <div className="animate-fade-in max-w-3xl">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-3xl sm:text-4xl font-semibold text-txt-primary tracking-tight">
-            Пульс индустрии
-          </h1>
-          <p className="mt-2 text-base text-txt-secondary">
-            Что происходит в киносообществе прямо сейчас
-          </p>
-        </div>
-        <button onClick={openCreate} className="btn-secondary">
-          <Plus className="h-4 w-4" /> Разместить
-        </button>
+      <div className="mb-6">
+        <h1 className="font-display text-3xl sm:text-4xl font-semibold text-txt-primary tracking-tight">
+          Пульс индустрии
+        </h1>
+        <p className="mt-2 text-base text-txt-secondary">
+          Что происходит в киносообществе прямо сейчас
+        </p>
       </div>
 
       {loading ? (
@@ -102,12 +80,9 @@ export function PulsePage() {
           <Activity className="h-8 w-8 text-txt-muted mx-auto mb-4" strokeWidth={1.5} />
           <p className="text-txt-primary text-lg font-medium">В ленте пока пусто</p>
           <p className="text-txt-secondary text-sm mt-2 max-w-md mx-auto leading-relaxed">
-            Пульс собирается из реальных действий: кто-то разместил объявление, открыл проект
-            или начал искать группу. Опубликуйте что-нибудь — и это появится здесь первым.
+            Лента наполняется сама: как только кто-то разместит объявление, откроет проект
+            или начнёт искать группу — это появится здесь.
           </p>
-          <button onClick={openCreate} className="mt-5 btn-primary">
-            <Plus className="h-4 w-4" /> Разместить
-          </button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -154,16 +129,6 @@ export function PulsePage() {
         </div>
       )}
 
-      {showCreate && (
-        <CreateDialog
-          onClose={() => setShowCreate(false)}
-          onCreated={(kind, id) => {
-            setShowCreate(false);
-            if (kind === 'listing') navigate(`/listing/${id}`);
-            else load();
-          }}
-        />
-      )}
     </div>
   );
 }
