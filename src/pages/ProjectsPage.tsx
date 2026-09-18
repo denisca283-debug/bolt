@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, MapPin, Users, Clapperboard, Search, ImageOff } from 'lucide-react';
+import { Loader2, MapPin, Users, Clapperboard, Search, ImageOff, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useRouter } from '../router';
-import { PublishMenu } from '../components/create/PublishMenu';
+import { CreateDialog } from '../components/create/CreateDialog';
+import { useAuth } from '../hooks/useAuth';
+import { useAuthModal } from '../components/AuthModal';
 import type { ProjectRow } from '../types';
 
 const STAGES = ['Все', 'Разработка', 'Препродакшн', 'Съёмки', 'Постпродакшн', 'Завершён'];
 
 export function ProjectsPage() {
-  const { navigate } = useRouter();
+  const { user } = useAuth();
+  const { promptGuest } = useAuthModal();
+  const [showCreate, setShowCreate] = useState(false);
 
   const [items, setItems] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +57,18 @@ export function ProjectsPage() {
           <h1 className="font-display text-3xl sm:text-4xl font-semibold text-txt-primary tracking-tight">Проекты</h1>
           <p className="mt-2 text-base text-txt-secondary">Что снимается и кто это делает</p>
         </div>
-        <PublishMenu onCreated={(kind, id) => { if (kind === 'listing') navigate(`/listing/${id}`); else load(); }} />
+        <button
+          onClick={() => {
+            if (!user) {
+              promptGuest({ message: 'Чтобы открыть проект, войдите в FilmVerse или создайте аккаунт.' });
+              return;
+            }
+            setShowCreate(true);
+          }}
+          className="btn-primary"
+        >
+          <Plus className="h-4 w-4" /> Создать проект
+        </button>
       </div>
 
       <div className="relative mb-4">
@@ -150,6 +164,14 @@ export function ProjectsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {showCreate && (
+        <CreateDialog
+          initialKind="project"
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); load(); }}
+        />
       )}
     </div>
   );

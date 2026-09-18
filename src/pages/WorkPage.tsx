@@ -7,7 +7,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useRouter } from '../router';
 import { ShareButton, Badge, Avatar } from '../components/ui';
 import { MessageButton } from '../components/MessageButton';
-import { PublishMenu } from '../components/create/PublishMenu';
+import { CreateDialog } from '../components/create/CreateDialog';
+import { useAuthModal } from '../components/AuthModal';
 import type { WorkOpportunity, Department, AuthorLite } from '../types';
 
 const AUDIENCES = ['Все', 'Актёрам', 'Специалистам'] as const;
@@ -21,7 +22,9 @@ function daysAgo(iso: string) {
 
 export function WorkPage() {
   const { user } = useAuth();
+  const { promptGuest } = useAuthModal();
   const { navigate } = useRouter();
+  const [showCreate, setShowCreate] = useState(false);
 
   const [items, setItems] = useState<WorkOpportunity[]>([]);
   const [authors, setAuthors] = useState<Map<string, AuthorLite>>(new Map());
@@ -213,7 +216,18 @@ export function WorkPage() {
           <h1 className="font-display text-3xl sm:text-4xl font-semibold text-txt-primary tracking-tight">Работа</h1>
           <p className="mt-2 text-base text-txt-secondary">Роли, смены и места в съёмочных группах</p>
         </div>
-        <PublishMenu onCreated={(kind, id) => { if (kind === 'listing') navigate(`/listing/${id}`); else load(); }} />
+        <button
+          onClick={() => {
+            if (!user) {
+              promptGuest({ message: 'Чтобы разместить вакансию, войдите в FilmVerse или создайте аккаунт.' });
+              return;
+            }
+            setShowCreate(true);
+          }}
+          className="btn-primary"
+        >
+          <Plus className="h-4 w-4" /> Разместить вакансию
+        </button>
       </div>
 
       <div className="relative mb-4">
@@ -322,6 +336,14 @@ export function WorkPage() {
             );
           })}
         </div>
+      )}
+
+      {showCreate && (
+        <CreateDialog
+          initialKind="work"
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); load(); }}
+        />
       )}
     </div>
   );
