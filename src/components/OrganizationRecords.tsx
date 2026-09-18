@@ -1,0 +1,45 @@
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { useOrganization, type Organization } from '../hooks/useOrganization';
+import { CreateDialog } from './create/CreateDialog';
+
+type Row = { id: string; title?: string; name?: string; custom_name?: string; brand?: string; model?: string; category?: string; city?: string; description?: string; quantity?: number; package_id?: string; inventory_item_id?: string; requirement?: string };
+const sections = [
+  { table: 'organization_briefs', title: 'Приватные брифы', permission: 'manage_projects', fields: [['title', 'Название брифа'], ['description', 'Задача'], ['city', 'География'], ['confidential_budget', 'Закрытый бюджет']] },
+  { table: 'organization_inventory_items', title: 'Инвентарь', permission: 'manage_inventory', fields: [['custom_name', 'Название оборудования'], ['brand', 'Бренд'], ['model', 'Модель'], ['category', 'Категория'], ['description', 'Описание'], ['city', 'Город'], ['quantity', 'Количество']] },
+  { table: 'equipment_packages', title: 'Комплекты', permission: 'manage_inventory', fields: [['name', 'Название комплекта'], ['description', 'Описание комплекта']] },
+] as const;
+type Source = { title: string; category: string; city: string; description: string; inventory_item_id?: string; equipment_package_id?: string };
+export function OrganizationRecords({ company }: { company: Organization }) {
+  const { can } = useOrganization();
+  const [source, setSource] = useState<Source | null>(null);
+  return <div className="space-y-6">{sections.filter(s => can(s.permission, company.id)).map(s => <RecordSection key={s.table} section={s} company={company} publish={can('manage_marketplace', company.id) ? setSource : undefined} />)}{source && <CreateDialog initialKind="listing" allowKindSwitch={false} rentalSource={source} onClose={() => setSource(null)} onCreated={() => setSource(null)} />}</div>;
+}
+function RecordSection({ section, company, publish }: { section: typeof sections[number]; company: Organization; publish?: (source: Source) => void }) {
+  const [rows, setRows] = useState<Row[]>([]); const [error, setError] = useState(''); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [revision, setRevision] = useState(0); const [page, setPage] = useState(0);
+  useEffect(() => { let stale = false; setLoading(true); setRows([]); setError(''); void (async () => { try {
+    const fields = ['id', ...section.fields.map(f => f[0]).filter(f => f !== 'confidential_budget')].join(',');
+    const result = await supabase.from(section.table).select(fields).eq('organization_id', company.id).order('created_at', { ascending: false }).range(page * 24, page * 24 + 23);
+    if (result.error) throw result.error; if (!stale) setRows((result.data || []) as unknown as Row[]);
+  } catch { if (!stale) setError('Данные недоступны. Проверьте подключение и права.'); } finally { if (!stale) setLoading(false); } })(); return () => { stale = true; }; }, [company.id, section, revision, page]);
+  return <section className="border-t border-line-soft pt-5 space-y-3"><h3 className="font-semibold">{section.title}</h3><p className="text-xs text-txt-muted">Закрытые рабочие данные компании. Публичное предложение создаётся отдельно.</p>
+    {error && <p role="alert">{error} <button onClick={() => setRevision(n => n + 1)}>Повторить</button></p>}{loading && <p role="status">Загрузка…</p>}
+    {rows.map(row => <article className="surface p-3 space-y-2" key={row.id}><strong>{row.title || row.name || row.custom_name}</strong><p className="text-sm whitespace-pre-wrap">{row.description}</p>{row.quantity !== undefined && <p>{row.brand} {row.model} · {row.quantity} шт.</p>}{section.table === 'equipment_packages' && <PackageItems companyId={company.id} packageId={row.id} />}{publish && section.table !== 'organization_briefs' && <button className="text-emerald-500" onClick={() => publish({ title: [row.brand, row.model, row.custom_name || row.name].filter(Boolean).join(' '), category: row.category || 'Другое', city: row.city || company.city || '', description: row.description || '', ...(section.table === 'equipment_packages' ? { equipment_package_id: row.id } : { inventory_item_id: row.id }) })}>Опубликовать предложение</button>}</article>)}
+    <div className="flex gap-3 text-sm"><button disabled={page === 0 || loading} onClick={() => setPage(n => n - 1)}>Назад</button><span>{page + 1}</span><button disabled={rows.length < 24 || loading} onClick={() => setPage(n => n + 1)}>Далее</button></div>
+    <form className="grid sm:grid-cols-2 gap-3" onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const data = new FormData(form); const values: Record<string, unknown> = { organization_id: company.id }; for (const [key] of section.fields) values[key] = key === 'quantity' ? Number(data.get(key)) : data.get(key); setBusy(true); setError(''); void (async () => { try { const r = await supabase.from(section.table).insert(values).select('id').single(); if (r.error) throw r.error; form.reset(); setPage(0); setRevision(n => n + 1); } catch { setError('Не сохранено. Проверьте поля и права.'); } finally { setBusy(false); } })(); }}>
+      {section.fields.map(([key, label], i) => <label className="block text-sm" key={key}>{label}<input name={key} className="input-field" required={i === 0 || key === 'category' || key === 'quantity'} minLength={i === 0 ? 2 : undefined} maxLength={key === 'description' ? 10000 : 200} type={key === 'quantity' ? 'number' : 'text'} min={0} max={100000} defaultValue={key === 'quantity' ? 1 : key === 'city' ? company.city || '' : ''} /></label>)}<button className="btn-secondary" disabled={busy}>{busy ? 'Сохраняем…' : 'Добавить'}</button>
+    </form>
+  </section>;
+}
+function PackageItems({ companyId, packageId }: { companyId: string; packageId: string }) {
+  const [open, setOpen] = useState(false);
+  return <div><button className="text-sm text-emerald-500" onClick={() => setOpen(!open)}>{open ? 'Скрыть состав' : 'Состав комплекта'}</button>{open && <OpenPackageItems companyId={companyId} packageId={packageId} />}</div>;
+}
+function OpenPackageItems({ companyId, packageId }: { companyId: string; packageId: string }) {
+  const [items, setItems] = useState<Row[]>([]); const [inventory, setInventory] = useState<Row[]>([]); const [query, setQuery] = useState(''); const [revision, setRevision] = useState(0); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  useEffect(() => { let stale = false; void (async () => { try { const [i, p] = await Promise.all([
+    supabase.from('organization_inventory_items').select('id,custom_name').eq('organization_id', companyId).ilike('custom_name', '%' + query.trim() + '%').limit(24),
+    supabase.from('equipment_package_items').select('id,inventory_item_id,quantity,requirement,organization_inventory_items(custom_name)').eq('package_id', packageId).limit(100),
+  ]); if (i.error || p.error) throw new Error('load'); if (!stale) { setInventory(i.data || []); setItems((p.data || []).map(row => ({ ...row, custom_name: (row.organization_inventory_items as unknown as { custom_name: string })?.custom_name }))); } } catch { if (!stale) setError('Не удалось загрузить состав комплекта.'); } })(); return () => { stale = true; }; }, [companyId, packageId, query, revision]);
+  return <div className="space-y-2">{error && <p role="alert">{error}</p>}{items.map(i => <p className="text-xs" key={i.id}>{i.custom_name || i.inventory_item_id} · {i.quantity} шт. · {i.requirement === 'required' ? 'обязательно' : 'опционально'}</p>)}<input aria-label="Найти оборудование для комплекта" className="input-field" placeholder="Найти оборудование" value={query} onChange={e => setQuery(e.target.value)} /><form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); const d = new FormData(e.currentTarget); setBusy(true); setError(''); void (async () => { try { const r = await supabase.from('equipment_package_items').insert({ organization_id: companyId, package_id: packageId, inventory_item_id: d.get('item'), quantity: Number(d.get('quantity')), requirement: d.get('requirement') }).select('id').single(); if (r.error) throw r.error; setRevision(n => n + 1); } catch { setError('Позиция не добавлена: проверьте права, количество и отсутствие дубля.'); } finally { setBusy(false); } })(); }}><select aria-label="Оборудование" name="item" className="input-field !w-auto" required>{inventory.map(i => <option key={i.id} value={i.id}>{i.custom_name}</option>)}</select><input aria-label="Количество в комплекте" name="quantity" type="number" min={1} max={100000} defaultValue={1} required className="input-field !w-24" /><select aria-label="Необходимость" name="requirement" className="input-field !w-auto"><option value="required">Обязательно</option><option value="optional">Опционально</option></select><button disabled={busy || !inventory.length} className="btn-secondary">Добавить позицию</button></form></div>;
+}

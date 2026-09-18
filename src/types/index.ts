@@ -73,6 +73,11 @@ export type UserProfession = {
 export type Skill = {
   id: string;
   name: string;
+  scope?: 'actor' | 'professional';
+  department_id?: string | null;
+  category?: string;
+  sort_order?: number;
+  is_active?: boolean;
 };
 
 // Actor-specific extension of a profile. One row per user who marks
@@ -124,6 +129,7 @@ export type Actor = {
 export type MarketplaceListing = {
   id: string;
   user_id: string;
+  organization_id?: string | null;
   title: string;
   mode: string;
   category: string | null;

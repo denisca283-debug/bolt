@@ -87,14 +87,14 @@ function ResumeEditor({ initial, onClose, onSaved }: { initial: Resume; onClose:
         finally { setBusy(false); }
       })();
     }}>
-      <label className="block">Заголовок<input className="input w-full" required minLength={2} maxLength={160} value={draft.headline} onChange={e => setDraft({ ...draft, headline: e.target.value })} /></label>
-      <label className="block">Желаемые профессии, через запятую<input className="input w-full" maxLength={1000} value={professions} onChange={e => setProfessions(e.target.value)} /></label>
-      <label className="block">Города, через запятую<input className="input w-full" maxLength={1000} value={cities} onChange={e => setCities(e.target.value)} /></label>
+      <label className="block">Заголовок<input className="input-field w-full" required minLength={2} maxLength={160} value={draft.headline} onChange={e => setDraft({ ...draft, headline: e.target.value })} /></label>
+      <label className="block">Желаемые профессии, через запятую<input className="input-field w-full" maxLength={1000} value={professions} onChange={e => setProfessions(e.target.value)} /></label>
+      <label className="block">Города, через запятую<input className="input-field w-full" maxLength={1000} value={cities} onChange={e => setCities(e.target.value)} /></label>
       <label className="block"><input type="checkbox" checked={draft.travel_ready} onChange={e => setDraft({ ...draft, travel_ready: e.target.checked })} /> Готовность к командировкам</label>
-      <label className="block">Когда можете начать<input className="input w-full" maxLength={200} value={draft.availability || ''} onChange={e => setDraft({ ...draft, availability: e.target.value })} /></label>
-      <label className="block">Условия и ставка<input className="input w-full" maxLength={200} value={draft.rate_text || ''} onChange={e => setDraft({ ...draft, rate_text: e.target.value })} /></label>
-      <label className="block">О работе, которую ищете<textarea className="input w-full" maxLength={10000} rows={5} value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
-      <label className="block">Кто видит<select className="input w-full" value={draft.visibility} onChange={e => setDraft({ ...draft, visibility: e.target.value })}><option value="public">Все, кому доступен мой профиль</option><option value="members">Участники FilmVerse</option><option value="private">Только я</option></select></label>
+      <label className="block">Когда можете начать<input className="input-field w-full" maxLength={200} value={draft.availability || ''} onChange={e => setDraft({ ...draft, availability: e.target.value })} /></label>
+      <label className="block">Условия и ставка<input className="input-field w-full" maxLength={200} value={draft.rate_text || ''} onChange={e => setDraft({ ...draft, rate_text: e.target.value })} /></label>
+      <label className="block">О работе, которую ищете<textarea className="input-field w-full" maxLength={10000} rows={5} value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} /></label>
+      <label className="block">Кто видит<select className="input-field w-full" value={draft.visibility} onChange={e => setDraft({ ...draft, visibility: e.target.value })}><option value="public">Все, кому доступен мой профиль</option><option value="members">Участники FilmVerse</option><option value="private">Только я</option></select></label>
       <p className="text-xs text-txt-muted">Сохранение не публикует черновик и не расходует право публикации. Изменения уже опубликованного резюме видны сразу.</p>
       {error && <p role="alert" className="text-danger-600">{error}</p>}
       <button className="btn-primary" disabled={busy}>{busy ? 'Сохраняем…' : 'Сохранить'}</button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { Search, Check } from 'lucide-react';
 import type { Skill } from '../../types';
 
@@ -6,18 +6,24 @@ type SkillsPickerProps = {
   skills: Skill[];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
+  actor?: boolean;
+  departmentId?: string;
 };
+const categoryLabels: Record<string, string> = { performance: 'Актёрское мастерство', movement: 'Движение и танец', combat: 'Трюки и бой', sport: 'Спорт', vehicles: 'Транспорт', animals: 'Животные', music: 'Музыка', other: 'Другое', camera: 'Камера', lighting: 'Свет', grip: 'Grip', post: 'Монтаж и пост', vfx: 'VFX', sound: 'Звук', makeup: 'Грим', production: 'Продакшн', stunts: 'Каскадёрская работа', art: 'Художественный департамент', costume: 'Костюм' };
 
 /**
  * Multi-select for the shared `skills` reference table. Used by actors
  * (Верховая езда, Фехтование…) and by crew alike (ARRI Alexa, DaVinci…),
  * because the seed list covers both and one person can be both.
  */
-export function SkillsPicker({ skills, selectedIds, onChange }: SkillsPickerProps) {
+export function SkillsPicker({ skills, selectedIds, onChange, actor = false, departmentId }: SkillsPickerProps) {
   const [query, setQuery] = useState('');
+  const [all, setAll] = useState(false);
 
   const q = query.trim().toLowerCase();
-  const visible = q ? skills.filter((s) => s.name.toLowerCase().includes(q)) : skills;
+  const visible = skills.filter(s => s.is_active !== false && (!q || s.name.toLowerCase().includes(q)))
+    .filter(s => all || selectedIds.includes(s.id) || (actor ? s.scope === 'actor' : s.scope === 'professional' && (!departmentId || s.department_id === departmentId)))
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 
   const toggle = (id: string) => {
     onChange(
@@ -47,13 +53,16 @@ export function SkillsPicker({ skills, selectedIds, onChange }: SkillsPickerProp
         />
       </div>
 
+      <button type="button" className="text-sm text-emerald-500 mb-3" onClick={() => setAll(!all)}>{all ? 'Показать подходящие' : 'Показать все навыки'}</button>
       {visible.length === 0 ? (
         <p className="text-sm text-txt-muted py-2">Ничего не найдено</p>
       ) : (
         <div className="flex flex-wrap gap-2">
-          {visible.map((s) => {
+          {visible.map((s, index) => {
             const active = selectedIds.includes(s.id);
             return (
+              <Fragment key={s.id}>
+              {(index === 0 || visible[index - 1].category !== s.category) && <h3 className="w-full text-xs font-semibold text-txt-muted mt-2">{s.scope === 'actor' ? 'Актёрские' : 'Профессиональные'} · {categoryLabels[s.category || 'other'] || s.category}</h3>}
               <button
                 key={s.id}
                 type="button"
@@ -67,6 +76,7 @@ export function SkillsPicker({ skills, selectedIds, onChange }: SkillsPickerProp
                 {active && <Check className="h-3.5 w-3.5 shrink-0" />}
                 <span>{s.name}</span>
               </button>
+              </Fragment>
             );
           })}
         </div>

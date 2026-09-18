@@ -31,7 +31,29 @@ test('organization identity: replay, consent, invitation and adversarial authori
    CREATE PUBLICATION supabase_realtime;
   `);
   const dir=new URL('../supabase/migrations/',import.meta.url);
-  for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort()) await db.exec(await readFile(new URL(file,dir),'utf8'));
+  const legacy='20000000-0000-4000-8000-000000000001';
+  let legacyOrg,legacyMember,legacyProject,legacySkill;
+  for(const file of (await readdir(dir)).filter(f=>f.endsWith('.sql')).sort()) {
+   if(file.includes('organization_identity_authority')){
+    await q('INSERT INTO auth.users(id) VALUES($1)',[legacy]);
+    await q("INSERT INTO profiles(id,full_name) VALUES($1,'Legacy owner')",[legacy]);
+    legacyOrg=await scalar("INSERT INTO organizations(name,slug,organization_type,created_by) VALUES('Legacy org','legacy-org','legacy_custom',$1) RETURNING id",[legacy]);
+    legacyMember=await scalar("INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,'owner') RETURNING id",[legacyOrg,legacy]);
+    legacyProject=await scalar("INSERT INTO projects(title,user_id) VALUES('Legacy personal project',$1) RETURNING id",[legacy]);
+    legacySkill=await scalar("INSERT INTO user_skills(user_id,skill_id) SELECT $1,id FROM skills WHERE name='Реклама' RETURNING id",[legacy]);
+   }
+   await db.exec(await readFile(new URL(file,dir),'utf8'));
+  }
+  await t.test('pre-layer rows retain IDs, custom type and personal ownership; experience selection maps without deletion',async()=>{
+   assert.equal(await scalar('SELECT id FROM organization_members WHERE organization_id=$1',[legacyOrg]),legacyMember);
+   assert.equal(await scalar('SELECT organization_type FROM organizations WHERE id=$1',[legacyOrg]),'legacy_custom');
+   const project=(await q('SELECT user_id,organization_id FROM projects WHERE id=$1',[legacyProject]))[0];
+   assert.equal(project.user_id,legacy);assert.equal(project.organization_id,null);
+   assert.equal(await scalar('SELECT id FROM user_skills WHERE user_id=$1',[legacy]),legacySkill);
+   assert.equal(await scalar('SELECT count(*)::int FROM user_experience_tags WHERE user_id=$1',[legacy]),1);
+   // Keep legacy fixture out of later public-discovery expectations.
+   await q("UPDATE organizations SET visibility='members_only' WHERE id=$1",[legacyOrg]);
+  });
   for(const id of ids){
    await q('INSERT INTO auth.users(id,email,email_confirmed_at) VALUES($1,$2,now())',[id,id+'@example.test']);
    await q('INSERT INTO profiles(id,full_name,public_slug) VALUES($1,$2,$3)',[id,'Test '+id,'test-'+id]);
@@ -207,6 +229,36 @@ test('organization identity: replay, consent, invitation and adversarial authori
    await q('SELECT resume_publish($1,$2)',[resume,crypto.randomUUID()]);
    await db.exec('RESET ROLE');assert.equal(await scalar('SELECT remaining_uses FROM account_entitlements WHERE id=$1',[grant]),1);
    assert.equal(await scalar('SELECT kind FROM resume_entitlement_receipts WHERE publication_id=$1',[resume]),'pro');
+  });
+  await t.test('custom skills trim, dedupe, bound count, remain owner-only; experience is separate',async()=>{
+   await as(c);await q("UPDATE profile_privacy_settings SET profile_visibility='private'");
+   const skill=await scalar("INSERT INTO user_custom_skills(name,scope) VALUES('  Unique   skill  ','actor') RETURNING id");
+   assert.equal(await scalar('SELECT name FROM user_custom_skills WHERE id=$1',[skill]),'Unique skill');
+   await assert.rejects(q("INSERT INTO user_custom_skills(name,scope) VALUES('unique skill','professional')"),e=>e.code==='23505');
+   for(let i=0;i<49;i++)await q("INSERT INTO user_custom_skills(name,scope) VALUES($1,'actor')",['Skill '+i]);
+   await assert.rejects(q("INSERT INTO user_custom_skills(name,scope) VALUES('Too many','actor')"),e=>e.code==='23514');
+   await q("INSERT INTO user_experience_tags(tag_id) SELECT id FROM experience_tags WHERE name='Реклама'");
+   await denied("INSERT INTO skills(name) VALUES('Client dictionary pollution')");
+   await as(a);assert.equal(await scalar('SELECT count(*)::int FROM user_custom_skills WHERE user_id=$1',[c]),0);
+   assert.equal((await q("UPDATE user_custom_skills SET name='hacked' WHERE id=$1 RETURNING id",[skill])).length,0);
+   assert.equal(await scalar('SELECT count(*)::int FROM user_experience_tags WHERE user_id=$1',[c]),0);
+   assert.equal(await scalar("SELECT is_active FROM skills WHERE name='Реклама'"),false);
+   assert.equal(await scalar("SELECT scope FROM skills WHERE name='Верховая езда'"),'actor');
+  });
+  await t.test('public team consent and representative contact redaction; every new table uses RLS',async()=>{
+   await as(a);await q("UPDATE organizations SET visibility='public' WHERE id=$1",[org]);
+   assert.equal((await scalar('SELECT company_team($1)',[org])).length,0);
+   await q('UPDATE organization_members SET public_visible=true WHERE organization_id=$1 AND user_id=$2',[org,a]);
+   await q("INSERT INTO profile_representations(name,contact,visibility,contact_visibility) VALUES('Agent','private-agent-phone','public','private')");
+   await as(null,'anon');assert.equal((await scalar('SELECT company_team($1)',[org])).length,1);
+   const reps=await scalar('SELECT person_representatives($1)',[a]);assert.equal(reps[0].name,'Agent');assert.equal(reps[0].contact,null);
+   await denied('SELECT * FROM profile_representations');
+   await db.exec('RESET ROLE');
+   for(const table of ['organization_invitations','organization_audit_events','organization_inventory_items','equipment_packages','equipment_package_items','project_organizations','organization_briefs','organization_entitlements','organization_promotions','organization_campaign_daily_metrics','organization_inbox_threads','profile_privacy_settings','profile_contacts','profile_representations','profile_media','profile_publications','resume_entitlement_receipts','resume_publication_requests','user_custom_skills','user_experience_tags']){
+    assert.equal(await scalar('SELECT relrowsecurity FROM pg_class WHERE oid=$1::regclass',[table]),true,table);
+   }
+   const definer=await q("SELECT proname,proconfig FROM pg_proc WHERE pronamespace='filmverse_private'::regnamespace AND prosecdef");
+   for(const f of definer)assert.ok(f.proconfig.some(c=>c.startsWith('search_path=')),f.proname);
   });
  }finally{await db.close();}
 });

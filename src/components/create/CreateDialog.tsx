@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { Loader2, ImagePlus, ShoppingBag, Briefcase, Clapperboard, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { useOrganization } from '../../hooks/useOrganization';
 import { addPulse } from '../../lib/pulse';
 import { CityInput } from '../CityInput';
 import type { Department, Profession } from '../../types';
@@ -10,6 +11,7 @@ import type { Department, Profession } from '../../types';
 export type CreateKind = 'listing' | 'work' | 'project';
 
 type CreateDialogProps = {
+  rentalSource?: { title: string; category: string; city: string; description: string; inventory_item_id?: string; equipment_package_id?: string };
   initialKind?: CreateKind;
   allowKindSwitch?: boolean;
   onClose: () => void;
@@ -56,22 +58,26 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated }: CreateDialogProps) {
+export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated, rentalSource }: CreateDialogProps) {
   const { user, profile } = useAuth();
+  const organization = useOrganization();
+  // Freeze author identity when opening: later context changes cannot silently
+  // publish a draft as a different organization. Database revalidates authority.
+  const [publisher] = useState(organization.selected);
   const [kind, setKind] = useState<CreateKind>(initialKind);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Shared
-  const [title, setTitle] = useState('');
-  const [city, setCity] = useState(profile?.city || '');
-  const [description, setDescription] = useState('');
+  const [title, setTitle] = useState(rentalSource?.title || '');
+  const [city, setCity] = useState(rentalSource?.city || profile?.city || '');
+  const [description, setDescription] = useState(rentalSource?.description || '');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   // Listing
   const [mode, setMode] = useState('Аренда');
-  const [category, setCategory] = useState('Камеры');
+  const [category, setCategory] = useState(rentalSource?.category || 'Камеры');
   const [price, setPrice] = useState('');
 
   // Work
@@ -144,6 +150,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
 
   const canSubmit =
     title.trim().length > 1 &&
+    (!publisher || organization.can(kind === 'listing' ? 'manage_marketplace' : kind === 'work' ? 'publish_jobs' : 'manage_projects', publisher.id)) &&
     !saving &&
     !uploading &&
     // A crew vacancy without a profession is exactly the "кто требуется?"
@@ -212,6 +219,11 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
       };
     }
 
+    payload.organization_id = publisher?.id || null;
+    if (kind === 'listing' && rentalSource) {
+      payload.inventory_item_id = rentalSource.inventory_item_id || null;
+      payload.equipment_package_id = rentalSource.equipment_package_id || null;
+    }
     // `.select()` matters: without it an insert blocked by a policy can come
     // back looking fine while nothing was written.
     const { data, error: insertErr } = await supabase.from(table).insert(payload).select('id').single();
@@ -516,6 +528,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
           </div>
         )}
 
+        <p className="text-sm mt-4">Публикуем от имени: <strong>{publisher ? `компании «${publisher.name}»` : personName}</strong>. Этот выбор закреплён за черновиком.</p>
         <button onClick={handleSubmit} disabled={!canSubmit} className="btn-primary w-full mt-5">
           {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Публикуем…</> : <><Check className="h-4 w-4" /> Опубликовать</>}
         </button>

@@ -4,6 +4,7 @@ import { Avatar, IconButton } from './ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from './AuthModal';
 import { PublishMenu } from './create/PublishMenu';
+import { useOrganization } from '../hooks/useOrganization';
 
 type TopBarProps = {
   onMenuClick: () => void;
@@ -12,6 +13,7 @@ type TopBarProps = {
 const SECTIONS_WITH_OWN_PUBLISH = ['/marketplace', '/work', '/projects'];
 
 export function TopBar({ onMenuClick }: TopBarProps) {
+  const organization = useOrganization();
   const { navigate, path } = useRouter();
   const ownPublishHere = SECTIONS_WITH_OWN_PUBLISH.some((p) => path === p || path.startsWith(`${p}/`));
   const { profile, user, isAuthenticated } = useAuth();
@@ -44,6 +46,12 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
       {isAuthenticated ? (
         <>
+          <select aria-label="Рабочий контекст" className="input-field !w-auto max-w-36 text-xs" value={organization.selected?.id || ''} disabled={organization.loading}
+            onChange={e => { if (e.target.value === 'manage') navigate('/organizations'); else organization.select(e.target.value); }}>
+            <option value="">Личный профиль</option>
+            {organization.organizations.map(o => <option key={o.id} value={o.id}>Компания: {o.name}</option>)}
+            <option value="manage">Мои компании…</option>
+          </select>
           {!ownPublishHere && (
             <PublishMenu
               onCreated={(kind, id) => {

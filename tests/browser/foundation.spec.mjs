@@ -97,3 +97,53 @@ test('real CreateDialog vacancy is viewport-safe at its last field',async({page}
   const box=await close.boundingBox(); expect(box.y).toBeGreaterThanOrEqual(0); expect(box.y+box.height).toBeLessThan(page.viewportSize().height);
   await close.click(); await expect(dialog).toHaveCount(0);
 });
+
+test('Resume opens dedicated creation, persists draft, and shows honest entitlement gate',async({page})=>{
+  await setup(page,{signedIn:true}); const rows=[];
+  await page.route('**/rest/v1/resume_publications*',route=>route.fulfill({json:rows}));
+  await page.route('**/rest/v1/profile_publications*',async route=>{
+    const body=route.request().postDataJSON(); rows.push({...body,id:'resume-fixture',status:'draft'});
+    await route.fulfill({json:{id:'resume-fixture'}});
+  });
+  await page.route('**/rest/v1/rpc/resume_publish',route=>route.fulfill({status:403,json:{code:'42501',message:'resume_entitlement_required'}}));
+  await page.goto('/'); await page.getByRole('button',{name:'Разместить',exact:true}).click();
+  await page.getByRole('button',{name:/Резюме/}).click();
+  await expect(page).toHaveURL(/resumes\/new/);
+  const dialog=page.getByRole('dialog'); await expect(dialog.getByRole('heading',{name:'Новое резюме'})).toBeVisible();
+  await dialog.getByLabel('Заголовок').fill('Оператор — ищу работу');
+  await dialog.getByRole('button',{name:'Сохранить',exact:true}).click();
+  await expect(dialog).toHaveCount(0); await expect(page.getByText('Черновик',{exact:false})).toBeVisible();
+  await page.getByRole('button',{name:'Опубликовать',exact:true}).click();
+  await expect(page.getByRole('dialog').getByText(/Оплата пока не подключена/)).toBeVisible();
+  expect(rows).toHaveLength(1); expect(rows[0].status).toBe('draft');
+});
+
+test('multi-company context freezes publication author; payload names company not employee ownership',async({page})=>{
+  await setup(page,{signedIn:true});
+  const companies=[{id:'company-a',name:'Production A',slug:'production-a',organization_type:'production_company'},{id:'company-b',name:'Agency B',slug:'agency-b',organization_type:'agency'}];
+  await page.route('**/rest/v1/organizations*',route=>route.fulfill({json:companies}));
+  await page.route('**/rest/v1/organization_members*',route=>route.fulfill({json:companies.map(o=>({organization_id:o.id,role:'owner',active:true}))}));
+  await page.route('**/rest/v1/organization_role_permissions*',route=>route.fulfill({json:[{role_key:'owner',permission:'publish_jobs'}]}));
+  let sent;
+  await page.route('**/rest/v1/work_opportunities*',route=>{
+    if(route.request().method()==='POST'){sent=route.request().postDataJSON(); return route.fulfill({json:{id:'work-fixture'}});}
+    return route.fulfill({json:[]});
+  });
+  await page.goto('/'); const context=page.getByLabel('Рабочий контекст');
+  await expect(context.locator('option')).toHaveCount(4); await context.selectOption('company-b');
+  await page.getByRole('button',{name:'Разместить',exact:true}).click(); await page.getByRole('button',{name:/Вакансию/}).click();
+  const dialog=page.getByRole('dialog'); await expect(dialog.getByText(/компании «Agency B»/)).toBeVisible();
+  await dialog.locator('input').first().fill('Главная роль в фильме');
+  await dialog.getByRole('button',{name:/Опубликовать/}).click();
+  await expect.poll(()=>sent?.organization_id).toBe('company-b'); expect(sent.user_id).toBe(user.id);
+});
+
+test('company public page shows only safe projection and approved badge',async({page})=>{
+  await setup(page);
+  await page.route('**/rest/v1/rpc/company_public',route=>route.fulfill({json:{id:'company',slug:'rental',name:'Rental Test',organization_type:'rental_house',description:'Профессиональная аренда',verified:false,search_engine_indexable:false}}));
+  await page.route('**/rest/v1/rpc/company_team',route=>route.fulfill({json:[]}));
+  await page.goto('/#/company/rental'); await expect(page.getByRole('heading',{name:'Rental Test'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Оборудование и предложения аренды'})).toBeVisible();
+  await expect(page.getByText('Проверена',{exact:false})).toHaveCount(0);
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
+});

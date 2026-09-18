@@ -12,6 +12,9 @@ import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
 import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
 import { SkillsPicker } from '../components/profile/SkillsPicker';
+import { AdditionalSkills } from '../components/profile/AdditionalSkills';
+import { ProfileContacts } from '../components/profile/ProfileContacts';
+import { ProfileMedia } from '../components/profile/ProfileMedia';
 import { MessageButton } from '../components/MessageButton';
 import type { Actor, Department, Profession, Profile, Skill } from '../types';
 
@@ -559,7 +562,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   };
 
   const selectedSkillNames = allSkills
-    .filter((s) => skillIds.includes(s.id))
+    .filter((s) => s.is_active !== false && skillIds.includes(s.id))
     .map((s) => s.name);
 
   // Missing profile basics (owner-only). What counts as missing depends on the
@@ -774,6 +777,8 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
           {(editIsActor || editIsSpecialist) && allSkills.length > 0 && (
             <SkillsPicker
               skills={allSkills}
+              actor={editIsActor}
+              departmentId={editDeptId}
               selectedIds={editSkillIds}
               onChange={setEditSkillIds}
             />
@@ -984,6 +989,9 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
       )}
 
       {/* Skills */}
+      {displayProfile?.id && <AdditionalSkills userId={displayProfile.id} editable={isOwnProfile} />}
+      {displayProfile?.id && <ProfileContacts userId={displayProfile.id} />}
+      {displayProfile?.id && <ProfileMedia userId={displayProfile.id} />}
       {selectedSkillNames.length > 0 && (
         <Card className="p-6 mt-6">
           <div className="flex items-center gap-2 mb-4">
