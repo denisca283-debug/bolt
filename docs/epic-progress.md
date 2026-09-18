@@ -1,5 +1,25 @@
 # FilmVerse epic — first review packet
 
+## Continuation: profile security gate (prepared, NOT applied to live DB)
+
+New migration `20260918211553_profile_column_security.sql` removes client writes
+to legacy `plan`, ID updates and server timestamps, and removes all client reads
+of `date_of_birth`. Existing values are retained for trusted server access.
+Frontend profile reads now use an explicit allowed projection. Discussion creation
+uses the existing trusted-permission RPC instead of PRO plus verification count.
+See [rollout and review](profile-security-review.md) before deployment.
+
+Validation: 34 tests pass, including PGlite PostgreSQL grant/RLS adversarial tests
+and permission-hook account-switch races. Typecheck/build pass; lint has zero
+errors and the same six warnings. Production risks below remain live until the
+reviewed migration is applied. No merge or production data mutation performed.
+
+Next: resolve historical 011 replay/live drift, then implement phases 4–5
+(persisted resume and server-owned entitlement records). This gate is not a claim
+that those phases, the whole migration chain, or production acceptance are done.
+
+## Original foundation packet
+
 This is a partial delivery, not completion of phases 0–68. No merge or live database
 mutation was performed in this packet. The previous working directory is intact.
 

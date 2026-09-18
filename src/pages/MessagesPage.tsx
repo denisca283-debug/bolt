@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Send, Plus, Users, Building2, MessageSquare, Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useDiscussionPermission } from '../hooks/useDiscussionPermission';
 import { useAuthModal } from '../components/AuthModal';
 import { Avatar } from '../components/ui';
 import { NewChatDialog } from '../components/chat/NewChatDialog';
@@ -29,7 +30,7 @@ function timeLabel(iso: string | null) {
 }
 
 export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {}) {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { openLogin } = useAuthModal();
 
   const [rooms, setRooms] = useState<RoomView[]>([]);
@@ -43,7 +44,6 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
   const [loading, setLoading] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
-  const [verifiedTypes, setVerifiedTypes] = useState(0);
   // Personal messages did not disappear when rooms arrived — they are the
   // 'direct' kind. This filter keeps them a section of their own.
   const [tab, setTab] = useState<'all' | 'direct' | 'group' | 'department'>('all');
@@ -51,6 +51,7 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const appliedInitialRef = useRef<string | null>(null);
   const userId = user?.id;
+  const { allowed: canCreateDepartmentChat, reason: departmentLockReason } = useDiscussionPermission(userId);
 
   // Arriving from "Написать" on a profile or listing: /messages/<roomId>.
   // Applied once per id so it never fights a chat the person picked by hand.
@@ -135,19 +136,9 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
     if (!userId) return;
     let cancelled = false;
     (async () => {
-      const [deptRes, verifRes] = await Promise.all([
-        supabase.from('departments').select('*').order('sort_order'),
-        supabase
-          .from('verification_records')
-          .select('verification_type')
-          .eq('user_id', userId)
-          .eq('status', 'approved'),
-      ]);
+      const deptRes = await supabase.from('departments').select('*').order('sort_order');
       if (cancelled) return;
       if (deptRes.data) setDepartments(deptRes.data as Department[]);
-      setVerifiedTypes(
-        new Set(((verifRes.data || []) as { verification_type: string }[]).map((v) => v.verification_type)).size
-      );
     })();
     return () => { cancelled = true; };
   }, [userId]);
@@ -177,14 +168,6 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
     const last = messages[messages.length - 1];
     if (activeRoomId && last) markChatRead(activeRoomId, last.id);
   }, [messages, activeRoomId]);
-
-  const isPro = profile?.plan === 'pro';
-  const canCreateDepartmentChat = isPro && verifiedTypes >= 2;
-  const departmentLockReason = !isPro && verifiedTypes < 2
-    ? 'Чаты департаментов доступны по подписке Про и после двух пройденных верификаций. У вас пока нет ни того, ни другого.'
-    : !isPro
-    ? 'Верификации пройдены. Для чатов департаментов не хватает подписки Про.'
-    : `Подписка Про есть. Для чатов департаментов нужны две разные пройденные верификации — сейчас ${verifiedTypes === 0 ? 'нет ни одной' : 'есть одна'}.`;
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId) || null;
 

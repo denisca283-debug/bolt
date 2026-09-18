@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { classifySignup, classifyProfile, ensureProfile, liveSession, type SignupOutcome, type ProfileResult } from '../lib/auth-state';
 import type { Profile } from '../types';
+import { PROFILE_FIELDS } from '../lib/profile-fields';
 
 type AuthContextValue = {
   user: User | null;
@@ -188,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 async function fetchProfile(userId: string): Promise<ProfileResult<Profile>> {
   try {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select(PROFILE_FIELDS).eq('id', userId).maybeSingle();
     return classifyProfile(data as Profile | null, error);
   } catch (error) {
     return classifyProfile<Profile>(null, error);
