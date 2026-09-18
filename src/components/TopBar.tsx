@@ -9,21 +9,13 @@ type TopBarProps = {
   onMenuClick: () => void;
 };
 
-/**
- * Sections that carry their own primary "Разместить" button. The global one in
- * the bar steps aside there, so the same action never appears twice on screen.
- */
 const SECTIONS_WITH_OWN_PUBLISH = ['/marketplace', '/work', '/projects'];
 
 export function TopBar({ onMenuClick }: TopBarProps) {
   const { navigate, path } = useRouter();
   const ownPublishHere = SECTIONS_WITH_OWN_PUBLISH.some((p) => path === p || path.startsWith(`${p}/`));
-  const { profile, user, isAuthenticated, hasBeenAuthenticated } = useAuth();
+  const { profile, user, isAuthenticated } = useAuth();
   const { openLogin, openRegister } = useAuthModal();
-  // Keep showing the authenticated chrome during a transient session gap
-  // (e.g. a background token-refresh hiccup) instead of flashing guest UI
-  // while the rest of the page still treats the user as logged in.
-  const showAuthedUI = isAuthenticated || hasBeenAuthenticated;
 
   const displayName = profile?.full_name || user?.email || 'Гость';
   const initials = displayName
@@ -35,12 +27,10 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
   return (
     <header className="sticky top-0 z-30 flex items-center gap-3 h-16 px-4 lg:px-6 bg-base-900/90 backdrop-blur-xl border-b border-line-soft">
-      {/* Mobile menu */}
       <IconButton label="Меню" onClick={onMenuClick} className="lg:hidden">
         <Menu className="h-5 w-5" />
       </IconButton>
 
-      {/* Search */}
       <div className="relative flex-1 max-w-md">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-txt-muted" />
         <input
@@ -52,9 +42,8 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
       <div className="flex-1" />
 
-      {showAuthedUI ? (
+      {isAuthenticated ? (
         <>
-          {/* Quick action — a named menu, and only where the page has none */}
           {!ownPublishHere && (
             <PublishMenu
               onCreated={(kind, id) => {
@@ -65,7 +54,6 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             />
           )}
 
-          {/* Notifications */}
           <div className="relative">
             <IconButton label="Уведомления" onClick={() => navigate('/notifications')}>
               <Bell className="h-[18px] w-[18px]" />
@@ -73,7 +61,6 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-base-900" />
           </div>
 
-          {/* Avatar */}
           <button onClick={() => navigate('/profile')} className="shrink-0" aria-label="Профиль">
             {profile?.avatar_url ? (
               <img src={profile.avatar_url} alt="" className="h-9 w-9 rounded-full object-cover ring-2 ring-emerald-400/30 ring-offset-2 ring-offset-base-900" />
@@ -91,10 +78,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             <LogIn className="h-4 w-4" />
             <span>Войти</span>
           </button>
-          <button
-            onClick={openRegister}
-            className="btn-primary !py-2 !px-4"
-          >
+          <button onClick={openRegister} className="btn-primary !py-2 !px-4">
             <UserPlus className="h-4 w-4" />
             <span>Регистрация</span>
           </button>
