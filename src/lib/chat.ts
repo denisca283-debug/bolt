@@ -4,87 +4,101 @@ export type OpenChatResult =
   | { roomId: string; error: null }
   | { roomId: null; error: string };
 
+/** Client-generated id, used as an idempotency key by the chat functions. */
+export function newRequestId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  // Fallback for older browsers: good enough as a request key.
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 /**
- * Find (or create) the personal 1:1 chat between two people and return its id.
+ * Turn a Postgres error into something a person can act on.
+ * 42501 is the code the chat functions raise for "you may not do this".
+ */
+function readableError(err: { code?: string; message?: string } | null, fallback: string) {
+  if (!err) return fallback;
+  if (err.code === '42501') return 'Недостаточно прав для этого действия.';
+  if (err.code === 'P0002') return 'Пользователь не найден.';
+  if (err.code === 'PGRST202' || err.message?.includes('does not exist')) {
+    return 'Раздел сообщений ещё не готов в базе — не применена миграция 011_secure_messaging_core.';
+  }
+  return err.message || fallback;
+}
+
+/**
+ * Open (or reopen) the personal 1:1 chat with someone and return its id.
  *
- * A direct room is the "Сообщения" case of the room model: kind = 'direct'
- * with exactly two members. Looking it up first keeps a second "Написать"
- * from spawning a duplicate thread with the same person.
+ * Writing to the chat tables directly is blocked by RLS on purpose — they
+ * carry SELECT policies only. Every write goes through a SECURITY DEFINER
+ * function that checks membership itself, so this calls the database's
+ * `get_or_create_direct_chat`, which also handles two people pressing
+ * "Написать" at the same moment without creating two rooms.
  */
 export async function openDirectChat(
   currentUserId: string,
-  otherUserId: string,
-  otherName?: string | null
+  otherUserId: string
 ): Promise<OpenChatResult> {
   if (!currentUserId) return { roomId: null, error: 'Войдите, чтобы написать сообщение.' };
   if (currentUserId === otherUserId) return { roomId: null, error: 'Это ваш собственный профиль.' };
 
-  // 1. Rooms I am in.
-  const { data: mine, error: mineErr } = await supabase
-    .from('chat_members')
-    .select('room_id')
-    .eq('user_id', currentUserId);
+  const { data, error } = await supabase.rpc('get_or_create_direct_chat', {
+    other_user_id: otherUserId,
+  });
 
-  if (mineErr) {
+  if (error || !data) {
+    return { roomId: null, error: readableError(error, 'Не удалось открыть переписку. Попробуйте ещё раз.') };
+  }
+  return { roomId: data as string, error: null };
+}
+
+/** Create a group (or department) chat. Department rooms need the trust rule. */
+export async function createGroupChat(params: {
+  title: string;
+  memberIds: string[];
+  departmentId?: string | null;
+}): Promise<OpenChatResult> {
+  const { data, error } = await supabase.rpc('chat_create_group', {
+    p_title: params.title,
+    p_members: params.memberIds,
+    p_department: params.departmentId ?? null,
+    p_request: newRequestId(),
+  });
+
+  if (error || !data) {
     return {
       roomId: null,
-      error: 'Раздел сообщений ещё не готов в базе. Выполните миграцию 010_chat_rooms_group_department.',
+      error: params.departmentId
+        ? readableError(error, 'База не разрешила создать чат департамента. Нужны подписка Про и две пройденные верификации.')
+        : readableError(error, 'Не удалось создать чат. Попробуйте ещё раз.'),
     };
   }
+  return { roomId: data as string, error: null };
+}
 
-  const myRoomIds = (mine || []).map((r: { room_id: string }) => r.room_id);
+/** Send a message. `requestId` makes a retry after a lost reply harmless. */
+export async function sendChatMessage(
+  roomId: string,
+  body: string,
+  requestId: string
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.rpc('chat_send', {
+    p_room: roomId,
+    p_body: body,
+    p_id: requestId,
+  });
+  if (error) return { error: readableError(error, 'Сообщение не отправилось. Попробуйте ещё раз.') };
+  return { error: null };
+}
 
-  if (myRoomIds.length > 0) {
-    // 2. Of those, the ones the other person is also in.
-    const { data: shared } = await supabase
-      .from('chat_members')
-      .select('room_id')
-      .eq('user_id', otherUserId)
-      .in('room_id', myRoomIds);
-
-    const sharedIds = (shared || []).map((r: { room_id: string }) => r.room_id);
-
-    if (sharedIds.length > 0) {
-      // 3. Only a two-person personal room counts — a group we both happen to
-      //    be in is not "личный чат".
-      const [roomsRes, countsRes] = await Promise.all([
-        supabase.from('chat_rooms').select('id, kind').in('id', sharedIds).eq('kind', 'direct'),
-        supabase.from('chat_members').select('room_id').in('room_id', sharedIds),
-      ]);
-
-      const size = new Map<string, number>();
-      for (const m of (countsRes.data || []) as { room_id: string }[]) {
-        size.set(m.room_id, (size.get(m.room_id) || 0) + 1);
-      }
-
-      const existing = ((roomsRes.data || []) as { id: string }[]).find((r) => size.get(r.id) === 2);
-      if (existing) return { roomId: existing.id, error: null };
-    }
+/** Mark the room read up to a message, so unread counts can work later. */
+export async function markChatRead(roomId: string, messageId: string): Promise<void> {
+  try {
+    await supabase.rpc('chat_mark_read', { p_room: roomId, p_message: messageId });
+  } catch {
+    // Best-effort: a failed read receipt must never block the conversation.
   }
-
-  // 4. Nothing yet — open a new personal chat.
-  const { data: room, error: roomErr } = await supabase
-    .from('chat_rooms')
-    .insert({
-      kind: 'direct',
-      title: otherName || 'Личный чат',
-      created_by: currentUserId,
-    })
-    .select('id')
-    .single();
-
-  if (roomErr || !room) {
-    return { roomId: null, error: 'Не удалось открыть переписку. Попробуйте ещё раз.' };
-  }
-
-  const { error: memberErr } = await supabase.from('chat_members').insert([
-    { room_id: room.id, user_id: currentUserId, role: 'owner' },
-    { room_id: room.id, user_id: otherUserId, role: 'member' },
-  ]);
-
-  if (memberErr) {
-    return { roomId: null, error: 'Чат создан, но собеседника добавить не удалось. Попробуйте ещё раз.' };
-  }
-
-  return { roomId: room.id, error: null };
 }

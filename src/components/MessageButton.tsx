@@ -44,7 +44,7 @@ export function MessageButton({
     }
     setBusy(true);
     setError(null);
-    const { roomId, error: err } = await openDirectChat(user.id, targetUserId, targetName);
+    const { roomId, error: err } = await openDirectChat(user.id, targetUserId);
     setBusy(false);
     if (err || !roomId) {
       setError(err || 'Не удалось открыть переписку.');

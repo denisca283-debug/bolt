@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from '../components/AuthModal';
 import { Avatar } from '../components/ui';
 import { NewChatDialog } from '../components/chat/NewChatDialog';
+import { sendChatMessage, markChatRead, newRequestId } from '../lib/chat';
 import type { ChatMessage, ChatRoom, Department } from '../types';
 
 type RoomView = ChatRoom & { memberNames: string[]; memberCount: number };
@@ -38,6 +39,7 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
@@ -66,7 +68,8 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
     const { data: memberRows, error: memberErr } = await supabase
       .from('chat_members')
       .select('room_id')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .is('left_at', null);
 
     // The chat tables arrive with a migration. Until it is applied, say so
     // plainly instead of showing an empty screen with no explanation.
@@ -170,7 +173,10 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+    // Keep the read marker on the last message the person has actually seen.
+    const last = messages[messages.length - 1];
+    if (activeRoomId && last) markChatRead(activeRoomId, last.id);
+  }, [messages, activeRoomId]);
 
   const isPro = profile?.plan === 'pro';
   const canCreateDepartmentChat = isPro && verifiedTypes >= 2;
@@ -187,15 +193,15 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
     if (!body || !activeRoomId || !userId) return;
     setSending(true);
 
-    const { error } = await supabase
-      .from('chat_messages')
-      .insert({ room_id: activeRoomId, sender_id: userId, body });
+    const { error } = await sendChatMessage(activeRoomId, body, newRequestId());
 
     if (error) {
+      setSendError(error);
       setSending(false);
       return;
     }
 
+    setSendError(null);
     setDraft('');
     await loadMessages();
     await loadRooms();
@@ -399,6 +405,12 @@ export function MessagesPage({ initialRoomId }: { initialRoomId?: string } = {})
                   )}
                   <div ref={bottomRef} />
                 </div>
+
+                {sendError && (
+                  <div className="mx-3 mb-2 p-2.5 rounded-lg bg-danger-200/30 border border-danger-600/30">
+                    <p className="text-xs text-danger-700 leading-relaxed">{sendError}</p>
+                  </div>
+                )}
 
                 <div className="p-3 border-t border-line-soft flex items-center gap-2">
                   <input

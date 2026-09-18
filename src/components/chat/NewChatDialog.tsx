@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Search, Check, Lock, Loader2, Users, MessageSquare, Building2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { openDirectChat, createGroupChat } from '../../lib/chat';
 import { Avatar } from '../ui';
 import type { ChatRoomKind, Department } from '../../types';
 
@@ -98,42 +99,24 @@ export function NewChatDialog({
     setCreating(true);
     setError(null);
 
-    const { data: room, error: roomErr } = await supabase
-      .from('chat_rooms')
-      .insert({
-        kind,
-        title: defaultTitle(),
-        department_id: kind === 'department' ? departmentId : null,
-        created_by: currentUserId,
-      })
-      .select('id')
-      .single();
-
-    if (roomErr || !room) {
-      // The department rule is enforced by the database, not just here, so a
-      // blocked insert surfaces as a policy error.
-      setError(
-        kind === 'department'
-          ? 'База не разрешила создать чат департамента. Нужны подписка Про и две пройденные верификации.'
-          : 'Не удалось создать чат. Попробуйте ещё раз.'
-      );
-      setCreating(false);
-      return;
-    }
-
-    const members = [
-      { room_id: room.id, user_id: currentUserId, role: 'owner' },
-      ...picked.map((p) => ({ room_id: room.id, user_id: p.id, role: 'member' })),
-    ];
-    const { error: memberErr } = await supabase.from('chat_members').insert(members);
-    if (memberErr) {
-      setError('Чат создан, но участников добавить не удалось. Откройте его и попробуйте снова.');
-      setCreating(false);
-      return;
-    }
+    // The chat tables are read-only to clients: creating a room goes through
+    // a database function that enforces membership and the department rule.
+    const result = kind === 'direct'
+      ? await openDirectChat(currentUserId, picked[0].id)
+      : await createGroupChat({
+          title: defaultTitle(),
+          memberIds: picked.map((p) => p.id),
+          departmentId: kind === 'department' ? departmentId : null,
+        });
 
     setCreating(false);
-    onCreated(room.id);
+
+    if (result.error || !result.roomId) {
+      setError(result.error || 'Не удалось создать чат. Попробуйте ещё раз.');
+      return;
+    }
+
+    onCreated(result.roomId);
   };
 
   return (
