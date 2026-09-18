@@ -20,12 +20,9 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { PRIVATE_ROUTES } from './components/nav-config';
-import { Loader2 } from 'lucide-react';
+import { supabaseConfigurationError } from './lib/supabase';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
-/**
- * Private routes carry sub-paths now (/messages/<roomId>), so an exact-set
- * lookup would let a guest through to the child route.
- */
 function isPrivatePath(path: string) {
   if (PRIVATE_ROUTES.has(path)) return true;
   return [...PRIVATE_ROUTES].some((p) => path.startsWith(`${p}/`));
@@ -40,6 +37,15 @@ const PRIVATE_ROUTE_MESSAGES: Record<string, string> = {
   '/profile': 'Чтобы открыть профиль, войдите в FilmVerse или создайте аккаунт.',
   '/onboarding': 'Чтобы заполнить профиль, войдите в FilmVerse.',
 };
+
+function privateRouteMessage(path: string) {
+  const base = Object.keys(PRIVATE_ROUTE_MESSAGES).find(
+    (route) => path === route || path.startsWith(`${route}/`)
+  );
+  return base
+    ? PRIVATE_ROUTE_MESSAGES[base]
+    : 'Войдите в FilmVerse, чтобы продолжить.';
+}
 
 function PageRouter() {
   const { path } = useRouter();
@@ -87,26 +93,20 @@ function PageRouter() {
 }
 
 function PrivateRouteGuard() {
-  const { isAuthenticated, authLoading, hasBeenAuthenticated } = useAuth();
+  const { isAuthenticated, authLoading } = useAuth();
   const { path, navigate } = useRouter();
   const { promptGuest } = useAuthModal();
   const handledRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (authLoading) return;
-    if (isAuthenticated) return;
-    // Don't redirect a previously-authenticated user on a transient session gap
-    if (hasBeenAuthenticated) return;
-    if (!isPrivatePath(path)) return;
+    if (authLoading || isAuthenticated || !isPrivatePath(path)) return;
     if (handledRef.current === path) return;
 
     handledRef.current = path;
-    const msg = PRIVATE_ROUTE_MESSAGES[path] || 'Войдите в FilmVerse, чтобы продолжить.';
     navigate('/');
-    promptGuest({ message: msg });
-  }, [authLoading, isAuthenticated, hasBeenAuthenticated, path, navigate, promptGuest]);
+    promptGuest({ message: privateRouteMessage(path) });
+  }, [authLoading, isAuthenticated, path, navigate, promptGuest]);
 
-  // Reset handled ref when path changes to a non-private route
   useEffect(() => {
     if (!isPrivatePath(path)) {
       handledRef.current = null;
@@ -116,17 +116,41 @@ function PrivateRouteGuard() {
   return null;
 }
 
+function DeploymentConfigError() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-base-900 px-4">
+      <div className="surface max-w-lg w-full p-6">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-danger-600 shrink-0 mt-0.5" />
+          <div>
+            <h1 className="font-display text-xl font-semibold text-txt-primary">
+              FilmVerse не подключён к базе
+            </h1>
+            <p className="mt-2 text-sm text-txt-secondary leading-relaxed">
+              В этом deployment отсутствует конфигурация Supabase. Для Vercel нужны
+              VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY, после их изменения нужен новый deploy.
+            </p>
+            {supabaseConfigurationError && (
+              <p className="mt-3 text-xs text-danger-700">{supabaseConfigurationError}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppContent() {
-  const { authLoading, isAuthenticated, hasBeenAuthenticated } = useAuth();
+  const { authLoading, isAuthenticated, supabaseReady } = useAuth();
   const { path } = useRouter();
 
-  // Standalone auth pages (forgot/reset password) — no AppShell
+  if (!supabaseReady) return <DeploymentConfigError />;
+
   if (STANDALONE_AUTH_ROUTES.has(path)) {
     if (path === '/forgot-password') return <ForgotPasswordPage />;
     if (path === '/reset-password') return <ResetPasswordPage />;
   }
 
-  // Loading state only on first mount before session is resolved
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-base-900">
@@ -135,11 +159,7 @@ function AppContent() {
     );
   }
 
-  // Guest hitting a private route — guard handles redirect + modal via effect.
-  // Only show the blocking spinner for users who were NEVER authenticated in this
-  // session. If a previously-authenticated user's session flickers (token refresh,
-  // transient null), keep the page mounted so edit state is not destroyed.
-  if (!isAuthenticated && isPrivatePath(path) && !hasBeenAuthenticated) {
+  if (!isAuthenticated && isPrivatePath(path)) {
     return (
       <>
         <PrivateRouteGuard />

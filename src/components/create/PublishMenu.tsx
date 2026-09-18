@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Briefcase, FileText, Clapperboard } from 'lucide-react';
+import { Plus, X, Briefcase, FileText } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAuthModal } from '../AuthModal';
 import { useRouter } from '../../router';
@@ -12,9 +12,9 @@ type PublishMenuProps = {
 };
 
 /**
- * Global publish entry (TopBar).
- * Opens a clear modal: Vacancy or Resume (and optionally Project).
- * Marketplace has its own button — do not change that flow.
+ * Global publish entry.
+ * It answers one simple question: Vacancy or Resume.
+ * Project creation lives in /projects; Marketplace keeps its own publish flow.
  */
 export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
   const { user } = useAuth();
@@ -23,7 +23,6 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState<CreateKind | null>(null);
 
-  // Escape closes the picker
   useEffect(() => {
     if (!pickerOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -50,13 +49,7 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
 
   const pickResume = () => {
     setPickerOpen(false);
-    // Резюме = заполненный профиль. Отдельной сущности «резюме» пока нет.
     navigate('/profile');
-  };
-
-  const pickProject = () => {
-    setPickerOpen(false);
-    setCreating('project');
   };
 
   return (
@@ -71,7 +64,6 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
         {!compact && <span>Разместить</span>}
       </button>
 
-      {/* ── Picker modal: Vacancy | Resume ── */}
       {pickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
           <div
@@ -98,10 +90,10 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
               id="publish-picker-title"
               className="font-display text-xl font-semibold text-txt-primary pr-8"
             >
-              Что разместить?
+              Что вы хотите разместить?
             </h2>
             <p className="mt-1.5 text-sm text-txt-secondary leading-relaxed">
-              Выберите тип публикации. Окно можно закрыть крестиком или кликом снаружи.
+              Выберите один из двух сценариев.
             </p>
 
             <div className="mt-5 space-y-2">
@@ -114,9 +106,9 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
                   <Briefcase className="h-5 w-5 text-emerald-500" strokeWidth={1.8} />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-txt-primary">Вакансия</span>
+                  <span className="block text-sm font-semibold text-txt-primary">Вакансию</span>
                   <span className="block text-xs text-txt-muted leading-snug mt-0.5">
-                    Роль, кастинг, место в группе, массовка
+                    Ищу человека: актёра, специалиста или массовку
                   </span>
                 </span>
               </button>
@@ -132,23 +124,7 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold text-txt-primary">Резюме</span>
                   <span className="block text-xs text-txt-muted leading-snug mt-0.5">
-                    Заполнить профиль — вас найдут работодатели
-                  </span>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={pickProject}
-                className="w-full flex items-start gap-3 p-3.5 rounded-xl border border-line-soft bg-surface-600 hover:border-emerald-400 hover:bg-emerald-200/10 text-left transition-all duration-200"
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-700 border border-line-soft shrink-0">
-                  <Clapperboard className="h-5 w-5 text-emerald-500" strokeWidth={1.8} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-txt-primary">Проект</span>
-                  <span className="block text-xs text-txt-muted leading-snug mt-0.5">
-                    Фильм, реклама, клип — искать команду
+                    Ищу работу — хочу, чтобы меня нашли
                   </span>
                 </span>
               </button>

@@ -38,7 +38,6 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [emailConfirmSent, setEmailConfirmSent] = useState(false);
 
-  // Close modal via useEffect when auth state flips to authenticated
   useEffect(() => {
     if (isAuthenticated && open) {
       setOpen(false);
@@ -133,8 +132,6 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
 
-    // Safety timeout — loading will be cleared by the useEffect above
-    // when isAuthenticated flips, but if that never happens:
     setTimeout(() => {
       setLoading((prev) => {
         if (prev) {
@@ -147,13 +144,11 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   };
 
   const title = emailConfirmSent
-    ? 'Подтвердите email'
+    ? 'Проверьте email'
     : guestMessage
     ? null
     : mode === 'login' ? 'Вход' : 'Регистрация';
 
-  // Memoised for the same reason as the router/auth contexts: a fresh object
-  // literal here re-renders every consumer on each render of this provider.
   const modalValue = useMemo(
     () => ({ openAuth, openLogin, openRegister, promptGuest, closeAuth }),
     [openAuth, openLogin, openRegister, promptGuest, closeAuth]
@@ -179,18 +174,36 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
                 <div className="flex justify-center mb-4">
                   <CheckCircle2 className="h-12 w-12 text-emerald-500" />
                 </div>
-                <p className="text-sm text-txt-secondary leading-relaxed mb-2">
-                  Мы отправили письмо на <span className="text-txt-primary font-medium">{email}</span>
+                <h2 className="font-display text-xl font-semibold text-txt-primary mb-3">
+                  Проверьте email
+                </h2>
+                <p className="text-sm text-txt-secondary leading-relaxed mb-3">
+                  Если <span className="text-txt-primary font-medium">{email}</span> — новый адрес,
+                  письмо с подтверждением придёт туда.
                 </p>
-                <p className="text-sm text-txt-secondary leading-relaxed mb-4">
-                  Перейдите по ссылке в письме, чтобы активировать аккаунт.
+                <p className="text-sm text-txt-secondary leading-relaxed mb-5">
+                  Если аккаунт FilmVerse на этот адрес уже существует, войдите или восстановите пароль.
                 </p>
-                <p className="text-xs text-txt-muted mb-6">
-                  Не пришло письмо? Проверьте папку «Спам».
-                </p>
-                <button onClick={closeAuth} className="text-sm text-txt-secondary hover:text-emerald-500 transition-colors">
-                  Продолжить просмотр
-                </button>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => switchMode('login')}
+                    className="btn-primary w-full"
+                  >
+                    Войти
+                  </button>
+                  <button
+                    onClick={() => { closeAuth(); navigate('/forgot-password'); }}
+                    className="btn-secondary w-full"
+                  >
+                    Восстановить пароль
+                  </button>
+                  <button
+                    onClick={closeAuth}
+                    className="w-full text-sm text-txt-muted hover:text-txt-secondary transition-colors py-2"
+                  >
+                    Продолжить просмотр
+                  </button>
+                </div>
               </div>
             ) : (
               <>
@@ -217,7 +230,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
                   <div className="mb-4 p-3 rounded-lg bg-warn-200/30 border border-warn-600/30 flex items-start gap-2">
                     <AlertCircle className="h-4 w-4 text-warn-700 shrink-0 mt-0.5" />
                     <p className="text-xs text-warn-700 leading-relaxed">
-                      Supabase не настроен. Проверьте .env
+                      Supabase не настроен. Проверьте переменные окружения deployment.
                     </p>
                   </div>
                 )}
