@@ -1,0 +1,10 @@
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { useRouter } from '../router';
+type Relation={id:string;organization_name:string;organization_slug:string;full_name:string;public_slug:string|null;role:string|null;relationship_type:string;stale:boolean};
+const labels:Record<string,string>={staff:'В штате',regular_freelancer:'Постоянно сотрудничаем',preferred_crew:'Пул специалистов',technical_partner:'Технические партнёры',vendor_partner:'Партнёры',instructor:'Преподаватели',mentor:'Менторы',other:'Сотрудничество'};
+export function ProfessionalGraph({organizationId,userId}:{organizationId?:string;userId?:string}){
+ const {navigate}=useRouter();const [rows,setRows]=useState<Relation[]>([]);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
+ useEffect(()=>{let stale=false;setRows([]);setError('');setLoading(true);void(async()=>{try{const r=await supabase.rpc('professional_graph',{p_org:organizationId||null,p_person:userId||null});if(r.error)throw r.error;if(!stale)setRows(r.data||[]);}catch{if(!stale)setError('Не удалось загрузить профессиональные связи.');}finally{if(!stale)setLoading(false);}})();return()=>{stale=true;};},[organizationId,userId]);
+ return <section className="space-y-3"><h2 className="text-xl">{organizationId?'Crew Network':'Профессиональные связи'}</h2>{loading&&<p role="status">Загружаем связи…</p>}{error&&<p role="alert">{error}</p>}{!loading&&!error&&!rows.length&&<p className="text-txt-muted">Публичных подтверждённых связей пока нет.</p>}<div className="grid sm:grid-cols-2 gap-3">{rows.map(r=><article className="surface p-4 space-y-2" key={r.id}><h3>{organizationId?r.full_name:r.organization_name}</h3><p>{r.role} · {labels[r.relationship_type]}</p><p className="text-sm text-txt-secondary">{r.stale?'Связь давно не подтверждалась':'Связь подтверждена обеими сторонами'}</p>{(!organizationId||r.public_slug)&&<button onClick={()=>navigate(organizationId?'/u/'+r.public_slug:'/company/'+r.organization_slug)}>Открыть профиль</button>}</article>)}</div></section>;
+}

@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase';
 import { useRouter } from '../router';
 import { useSearchIndexing } from '../hooks/useSearchIndexing';
 import { StudentSupportProgram } from '../components/StudentSupport';
+import { ProfessionalGraph } from '../components/ProfessionalGraph';
+import { IndustryListings } from './IndustryListings';
 import { ShareButton } from '../components/ui';
 
 type Company = { id: string; slug: string; name: string; organization_type: string; city: string | null; description: string | null; website?: string; logo_url?: string; cover_url?: string; service_geography?: string[]; specialties?: string[]; founded_year?: number; verified?: boolean; search_engine_indexable?: boolean };
@@ -22,6 +24,7 @@ export function CompaniesPage() {
   </section>;
 }
 export function CompanyPage({ slug }: { slug: string }) {
+  const [schoolTab, setSchoolTab] = useState('about');
   const { navigate } = useRouter();
   const [company, setCompany] = useState<Company | null>(null); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
   const [jobs, setJobs] = useState<Card[]>([]); const [projects, setProjects] = useState<Card[]>([]); const [listings, setListings] = useState<Card[]>([]); const [team, setTeam] = useState<Person[]>([]);
@@ -47,8 +50,12 @@ export function CompanyPage({ slug }: { slug: string }) {
   return <article className="max-w-6xl mx-auto p-4 sm:p-8 space-y-6">
     <header className="surface p-6 space-y-4">{safeLink(company.cover_url) && <img alt="" src={company.cover_url} className="w-full h-44 object-cover rounded-lg" />}<p className="text-emerald-500">{types[company.organization_type] || company.organization_type}</p><h1 className="font-display text-3xl">{company.name} {company.verified && <span className="text-sm text-emerald-500">✓ Проверена</span>}</h1><p>{company.city}{company.founded_year ? ` · С ${company.founded_year} года` : ''}</p><p className="whitespace-pre-wrap text-txt-secondary">{company.description}</p><p>{company.specialties?.join(' · ')}</p><p>{company.service_geography?.join(', ')}</p>{safeLink(company.website) && <a href={safeLink(company.website)} target="_blank" rel="noreferrer" className="text-emerald-500">Сайт компании ↗</a>}<ShareButton /></header>
     {error && <p role="alert">{error}</p>}
-    <StudentSupportProgram companyId={company.id} />
-    {sections.map(section => <section key={section.title} className="space-y-3"><h2 className="text-xl font-semibold">{section.title}</h2>{!section.rows.length ? <p className="text-txt-muted">Пока нет публичных публикаций.</p> : <div className="grid sm:grid-cols-2 gap-3">{section.rows.map(row => <div key={row.id} className="surface p-4"><h3>{row.title}</h3><p className="text-sm text-txt-muted">{row.city}</p>{section.rows === listings && <button className="text-emerald-500" onClick={() => navigate('/listing/' + row.id)}>Открыть предложение</button>}</div>)}</div>}</section>)}
+    {company.organization_type === 'education' && <nav aria-label="Разделы киношколы" className="flex flex-wrap gap-2">{[['about','О школе'],['programs','Программы'],['instructors','Преподаватели'],['events','События'],['projects','Студенческие проекты'],['opportunities','Возможности']].map(([key,label])=><button key={key} className={schoolTab===key?'btn-primary':'btn-secondary'} onClick={()=>setSchoolTab(key)}>{label}</button>)}</nav>}
+    {(company.organization_type !== 'education' || schoolTab==='instructors') && <ProfessionalGraph organizationId={company.id} />}
+    {company.organization_type === 'education' && schoolTab==='programs' && <IndustryListings education organizationId={company.id} />}
+    {company.organization_type === 'education' && schoolTab==='events' && <IndustryListings organizationId={company.id} />}
+    {(company.organization_type !== 'education' || schoolTab==='opportunities') && <StudentSupportProgram companyId={company.id} />}
+    {(company.organization_type !== 'education' ? sections : schoolTab==='projects' ? sections.filter(s=>s.rows===projects) : schoolTab==='opportunities' ? sections.filter(s=>s.rows===jobs) : []).map(section => <section key={section.title} className="space-y-3"><h2 className="text-xl font-semibold">{section.title}</h2>{!section.rows.length ? <p className="text-txt-muted">Пока нет публичных публикаций.</p> : <div className="grid sm:grid-cols-2 gap-3">{section.rows.map(row => <div key={row.id} className="surface p-4"><h3>{row.title}</h3><p className="text-sm text-txt-muted">{row.city}</p>{section.rows === listings && <button className="text-emerald-500" onClick={() => navigate('/listing/' + row.id)}>Открыть предложение</button>}</div>)}</div>}</section>)}
     {!!team.length && <section><h2 className="text-xl font-semibold mb-3">Публичная команда</h2><div className="flex flex-wrap gap-3">{team.map(person => person.public_slug ? <button className="surface p-3" key={person.id} onClick={() => navigate('/u/' + person.public_slug)}>{person.full_name}</button> : <span key={person.id}>{person.full_name}</span>)}</div></section>}
   </article>;
 }

@@ -1,5 +1,4 @@
-import { Fragment } from 'react';
-import { Settings, Bell, LogOut, LogIn, UserPlus } from 'lucide-react';
+import { Settings, Bell, MessageSquare, LogOut, LogIn, UserPlus } from 'lucide-react';
 import { navItems } from './nav-config';
 import { useRouter } from '../router';
 import { Avatar } from './ui';
@@ -51,9 +50,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           const Icon = item.icon;
           if (item.requiresAuth && !isAuthenticated) return null;
           return (
-            <Fragment key={item.path}>
-            {item.path === '/actors' && <p className="px-3.5 pt-4 pb-2 text-xs text-txt-muted">Люди</p>}
-            {item.path === '/companies' && <p className="px-3.5 pt-4 pb-2 text-xs text-txt-muted">Компании, работа и проекты</p>}
+            <div key={item.path}>
             <button
               key={item.path}
               onClick={() => go(item.path)}
@@ -67,7 +64,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </span>
               )}
             </button>
-            </Fragment>
+            </div>
           );
         })}
 
@@ -76,13 +73,15 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <p className="px-3.5 pb-2 text-[11px] font-semibold uppercase tracking-wider text-txt-muted">
               Личное
             </p>
+            <button className="nav-item" onClick={() => go('/partners')}><span>Партнёрский кабинет</span></button>
+            <button className="nav-item" onClick={() => go('/relationships')}><span>Профессиональные связи</span></button>
+            <button className="nav-item" onClick={() => go('/messages')}><MessageSquare className="h-[18px] w-[18px]" /><span>Сообщения</span></button>
             <button
               onClick={() => go('/notifications')}
               className={`nav-item ${path === '/notifications' ? 'nav-item-active' : ''}`}
             >
               <Bell className="h-[18px] w-[18px]" strokeWidth={1.8} />
               <span className="flex-1 text-left">Уведомления</span>
-              <span className="text-[10px] font-bold leading-none px-1.5 py-1 rounded-md bg-surface-500 text-txt-secondary">5</span>
             </button>
           </div>
         )}
