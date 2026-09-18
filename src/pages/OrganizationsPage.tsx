@@ -6,6 +6,7 @@ import { useRouter } from '../router';
 import { ModalShell } from '../components/ModalShell';
 import { CreateDialog, type CreateKind } from '../components/create/CreateDialog';
 import { canOfferOrganizationRole } from '../lib/organizationRoles';
+import { StudentSupportProgram } from '../components/StudentSupport';
 import { OrganizationRecords } from '../components/OrganizationRecords';
 
 type Dictionary = { key: string; label: string };
@@ -93,6 +94,7 @@ function CompanyWorkspace({ company }: { company: Organization }) {
       <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); void act(() => supabase.rpc('organization_invite', { p_org: company.id, p_email: email, p_role: role }), 'Приглашение сохранено. Письмо не отправлялось: получатель увидит приглашение в разделе «Мои компании».'); }}><input aria-label="Email приглашённого" type="email" className="input-field flex-1" required value={email} onChange={e => setEmail(e.target.value)} /><select aria-label="Роль приглашённого" className="input-field !w-auto" value={role} onChange={e => setRole(e.target.value)}>{roles.filter(r => canOfferOrganizationRole(ownMember?.role, r.key)).map(r => <option key={r.key} value={r.key}>{r.label}</option>)}</select><button className="btn-secondary" disabled={busy}>Пригласить</button></form>
     </section>}
     <OrganizationRecords company={company} />
+    <StudentSupportProgram companyId={company.id} editable />
     {ownMember?.active && <div className="border-t border-line-soft pt-4 space-y-3"><label className="block"><input type="checkbox" disabled={busy} checked={ownMember.public_visible} onChange={e => void act(() => supabase.from('organization_members').update({ public_visible: e.target.checked }).eq('organization_id', company.id).eq('user_id', user!.id).select('user_id').single(), 'Согласие обновлено.')} /> Показывать меня в публичной команде</label><button disabled={busy} onClick={() => void act(() => supabase.rpc('organization_member_change', { p_org: company.id, p_user: user!.id, p_role: ownMember.role, p_active: false }), 'Вы покинули компанию. Обновите список компаний.')}>Покинуть компанию</button></div>}
     {creating && <CreateDialog initialKind={creating} allowKindSwitch={false} onClose={() => setCreating(null)} onCreated={() => { setCreating(null); setNotice('Публикация компании сохранена.'); }} />}
   </section>;

@@ -5,12 +5,14 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import { useOrganization } from '../../hooks/useOrganization';
 import { addPulse } from '../../lib/pulse';
+import { compensationLabels } from '../../lib/modelTaxonomy';
 import { CityInput } from '../CityInput';
 import type { Department, Profession } from '../../types';
 
 export type CreateKind = 'listing' | 'work' | 'project';
 
 type CreateDialogProps = {
+  projectSource?: { id: string; title: string; city: string; visibility: string };
   rentalSource?: { title: string; category: string; city: string; description: string; inventory_item_id?: string; equipment_package_id?: string };
   initialKind?: CreateKind;
   allowKindSwitch?: boolean;
@@ -34,6 +36,7 @@ const LISTING_CATEGORIES = ['Камеры', 'Оптика', 'Свет', 'Зву�
  */
 const WORK_TARGETS = [
   { key: 'actor', audience: 'Актёры', label: 'Актёра', hint: 'Роль в проекте' },
+  { key: 'model', audience: 'Модели', label: 'Модель', hint: 'Модельная работа / TFP' },
   { key: 'crew', audience: 'Специалисты', label: 'Специалиста', hint: 'Человека в группу' },
   { key: 'extra', audience: 'Актёры', label: 'Массовку', hint: 'Людей на смену' },
 ] as const;
@@ -58,7 +61,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated, rentalSource }: CreateDialogProps) {
+export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated, rentalSource, projectSource }: CreateDialogProps) {
   const { user, profile } = useAuth();
   const organization = useOrganization();
   // Freeze author identity when opening: later context changes cannot silently
@@ -71,7 +74,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
 
   // Shared
   const [title, setTitle] = useState(rentalSource?.title || '');
-  const [city, setCity] = useState(rentalSource?.city || profile?.city || '');
+  const [city, setCity] = useState(projectSource?.city || rentalSource?.city || profile?.city || '');
   const [description, setDescription] = useState(rentalSource?.description || '');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 
@@ -81,16 +84,20 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
   const [price, setPrice] = useState('');
 
   // Work
-  const [target, setTarget] = useState<WorkTarget>('actor');
+  const [target, setTarget] = useState<WorkTarget>(projectSource ? 'model' : 'actor');
   const [roleType, setRoleType] = useState('Главная роль');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [professions, setProfessions] = useState<Profession[]>([]);
   const [deptId, setDeptId] = useState('');
   const [profId, setProfId] = useState('');
-  const [projectName, setProjectName] = useState('');
+  const [projectName, setProjectName] = useState(projectSource?.title || '');
   const [shootDate, setShootDate] = useState('');
   const [ageRange, setAgeRange] = useState('');
   const [pay, setPay] = useState('');
+  const [compensation, setCompensation] = useState('');
+  const [expenses, setExpenses] = useState('');
+  const [rights, setRights] = useState('');
+  const [deliverables, setDeliverables] = useState('');
   const [spots, setSpots] = useState('');
 
   // Project
@@ -151,6 +158,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
   const canSubmit =
     title.trim().length > 1 &&
     (!publisher || organization.can(kind === 'listing' ? 'manage_marketplace' : kind === 'work' ? 'publish_jobs' : 'manage_projects', publisher.id)) &&
+    (kind !== 'work' || target !== 'model' || (!!compensation && !!expenses.trim() && !!rights.trim() && !!deliverables.trim() && !!city.trim() && !!shootDate.trim())) &&
     !saving &&
     !uploading &&
     // A crew vacancy without a profession is exactly the "кто требуется?"
@@ -191,12 +199,19 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
           : target === 'extra' ? 'Массовка'
           : roleType,
         audience: targetDef.audience,
+        target_kinds: [target === 'model' ? 'models' : target === 'crew' ? 'crew' : 'actors'],
+        compensation_type: target === 'model' ? compensation : null,
+        expenses_covered: target === 'model' ? expenses : null,
+        usage_rights: target === 'model' ? rights : null,
+        deliverables: target === 'model' ? deliverables : null,
         department_id: target === 'crew' && deptId ? deptId : null,
         profession_id: target === 'crew' && profId ? profId : null,
         project_name: projectName.trim() || null,
+        project_id: projectSource?.id || null,
+        visibility: projectSource?.visibility || 'public',
         city: city.trim() || null,
         shoot_date: shootDate.trim() || null,
-        age_range: target === 'crew' ? null : ageRange.trim() || null,
+        age_range: target === 'crew' || target === 'model' ? null : ageRange.trim() || null,
         genre: null,
         pay: pay.trim() || null,
         spots_total: Number.isFinite(total) ? total : null,
@@ -241,7 +256,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
     // The legacy Pulse is person-owned and publicly readable. Do not emit a
     // company/private-business title under the employee's personal identity.
     // Company events need their own visibility-aware publication path.
-    if (publisher) {
+    if (publisher || projectSource) {
       setSaving(false);
       onCreated(kind, data.id as string);
       return;
@@ -262,7 +277,7 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
         person: personName,
         action: target === 'crew'
           ? `ищет в группу — ${chosenProfession?.name || 'специалиста'}`
-          : target === 'extra' ? 'набирает массовку' : 'ищет актёра',
+          : target === 'extra' ? 'набирает массовку' : target === 'model' ? 'ищет модель' : 'ищет актёра',
         target: projectName.trim() || title.trim(),
         photoUrl: profile?.avatar_url ?? null,
       });
@@ -414,6 +429,8 @@ export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, 
                     </select>
                   </Field>
                 </div>
+              ) : target === 'model' ? (
+                <div className="space-y-3"><label className="block">Компенсация<select className="input-field" value={compensation} onChange={e=>setCompensation(e.target.value)}><option value="">Выберите явно</option>{Object.entries(compensationLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label className="block">Покрытие расходов<input className="input-field" maxLength={1000} value={expenses} onChange={e=>setExpenses(e.target.value)} /></label><label className="block">Права использования<input className="input-field" maxLength={2000} value={rights} onChange={e=>setRights(e.target.value)} /></label><label className="block">Ожидаемый результат<input className="input-field" maxLength={2000} value={deliverables} onChange={e=>setDeliverables(e.target.value)} /></label><p className="text-xs text-txt-muted">TFP — сотрудничество без оплаты, не оплачиваемая работа. Укажите также даты и город.</p></div>
               ) : target === 'actor' ? (
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Тип роли">

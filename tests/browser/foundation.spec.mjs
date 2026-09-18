@@ -79,6 +79,63 @@ test('guest app load, auth modal close, protected route and invalid recovery rou
   await page.goto('/#/reset-password'); await expect(page.getByRole('heading',{name:'Ссылка недействительна'})).toBeVisible();
 });
 
+test('model extension saves atomically on same account, reloads measurements and keeps digitals distinct',async({page})=>{
+ await setup(page,{signedIn:true});let model=null,measurements=null;let authWrites=0;
+ page.on('request',r=>{if(r.method()==='POST'&&r.url().includes('/auth/v1/signup'))authWrites++;});
+ await page.route('**/rest/v1/model_profiles*',r=>r.fulfill({json:model}));
+ await page.route('**/rest/v1/model_measurements*',r=>r.fulfill({json:measurements}));
+ await page.route('**/rest/v1/rpc/model_save',r=>{const body=r.request().postDataJSON();model=body.p_model;measurements=body.p_measurements;return r.fulfill({json:null});});
+ await page.route('**/rest/v1/rpc/person_representatives',r=>r.fulfill({json:[]}));
+ await page.goto('/#/model-settings');await page.getByLabel('Commercial',{exact:true}).check();await page.getByLabel('Рост, см',{exact:true}).fill('178');await page.getByLabel('Видимость параметров').selectOption('members');
+ await page.getByRole('button',{name:'Сохранить специализацию'}).click();await expect(page.getByText('Модельная специализация и параметры сохранены.')).toBeVisible();
+ expect(model.categories).toEqual(['commercial']);expect(measurements.visibility).toBe('members');expect(authWrites).toBe(0);
+ await page.reload();await expect(page.getByLabel('Рост, см',{exact:true})).toHaveValue('178');
+ await expect(page.getByText(/Digitals — естественные фотографии/)).toBeVisible();
+ await expect(page.getByLabel('Тип медиа').locator('option[value="model_digitals"]')).toHaveCount(1);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+});
+
+test('models directory sends filters to server and opens dedicated real profile route',async({page})=>{
+ await setup(page);const calls=[];
+ await page.route('**/rest/v1/rpc/model_search',r=>{calls.push(r.request().postDataJSON());return r.fulfill({json:[{id:'model-person',full_name:'Model Person',city:'Москва',categories:['commercial'],height_cm:null}]});});
+ await page.goto('/#/models');await page.getByLabel('Категория модели').selectOption('commercial');await page.getByLabel('Город модели').fill('Москва');
+ await expect.poll(()=>calls.at(-1)?.p_filters.city).toBe('Москва');expect(calls.at(-1).p_offset).toBe(0);
+ await expect(page.getByRole('button',{name:/Model Person/})).toBeVisible();await page.getByRole('button',{name:/Model Person/}).click();await expect(page).toHaveURL(/model\/model-person/);
+});
+
+test('student affiliation is private by default; self-declared project creates no verified badge or Pulse event',async({page})=>{
+ await setup(page,{signedIn:true});const affiliations=[];let created;let pulseWrites=0;
+ await page.route('**/rest/v1/rpc/company_search',r=>r.fulfill({json:[]}));
+ await page.route('**/rest/v1/student_support_preferences*',r=>r.fulfill({json:null}));
+ await page.route('**/rest/v1/education_affiliations*',r=>{if(r.request().method()==='POST'){const body=r.request().postDataJSON();affiliations.push({...body,id:'education-fixture'});return r.fulfill({json:{id:'education-fixture'}});}return r.fulfill({json:affiliations});});
+ await page.route('**/rest/v1/projects*',r=>{if(r.request().method()==='POST'){created={...r.request().postDataJSON(),id:'student-project',user_id:user.id};return r.fulfill({json:{id:created.id}});}return r.fulfill({json:new URL(r.request().url()).searchParams.has('id')?created:[]});});
+ await page.route('**/rest/v1/pulse_feed*',r=>{if(r.request().method()==='POST')pulseWrites++;return r.fulfill({json:[]});});
+ await page.goto('/#/students');await page.getByRole('button',{name:'Добавить образование'}).click();let dialog=page.getByRole('dialog');await dialog.getByLabel('Учебное заведение',{exact:true}).fill('Киношкола');await dialog.getByLabel('Ожидаемый год выпуска').fill('2028');await dialog.getByRole('button',{name:'Сохранить образование'}).click();await expect(dialog).toHaveCount(0);expect(affiliations[0].visibility).toBe('private');
+ await page.getByRole('button',{name:'Создать студенческий проект'}).click();dialog=page.getByRole('dialog');await dialog.getByLabel('Название',{exact:true}).fill('Дипломный фильм');await dialog.getByLabel('Город',{exact:true}).fill('Москва');await dialog.getByLabel('Тип / формат').fill('Короткий метр');await dialog.getByLabel('Кратко о проекте').fill('Учебный фильм');await dialog.getByRole('button',{name:'Сохранить студенческий проект'}).click();
+ await expect(page.getByRole('heading',{name:'Дипломный фильм',exact:true})).toBeVisible();await expect(page.getByText('Студенческий проект — самоописание',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Попросить помощь'})).toHaveCount(0);
+ expect(created.student_project).toBe(true);expect(created.visibility).toBe('private');expect(pulseWrites).toBe(0);
+});
+
+test('verified student project publishes structured help with explicit unpaid terms',async({page})=>{
+ await setup(page,{signedIn:true});const rows=[];
+ await page.route('**/rest/v1/projects*',r=>r.fulfill({json:{id:'student-project',title:'Verified film',user_id:user.id,student_project:true,visibility:'public',city:'Москва'}}));
+ await page.route('**/rest/v1/rpc/student_project_badge',r=>r.fulfill({json:true}));
+ await page.route('**/rest/v1/project_support_requests*',r=>r.fulfill({json:rows}));
+ await page.route('**/rest/v1/rpc/support_request_create',r=>{const d=r.request().postDataJSON();expect(d.p_project).toBe('student-project');rows.push({...d.p_data,id:'need',status:'open'});return r.fulfill({json:'need'});});
+ await page.goto('/#/project/student-project');await page.getByRole('button',{name:'Попросить помощь'}).click();const dialog=page.getByRole('dialog');await dialog.getByLabel('Кто или что требуется').fill('Нужен 1AC');await dialog.getByLabel('Город',{exact:true}).fill('Москва');await dialog.getByLabel('Начало',{exact:true}).fill('2027-03-01');await dialog.getByLabel('Окончание',{exact:true}).fill('2027-03-02');await dialog.getByLabel('Компенсация').selectOption('unpaid_educational');await dialog.getByLabel('Какие расходы покрываются').fill('Проезд и питание');await dialog.getByLabel('Права использования результата').fill('Фестивальный показ');await dialog.getByLabel('Ожидаемый результат').fill('Две смены');await dialog.getByRole('button',{name:'Сохранить запрос помощи'}).click();
+ await expect(dialog).toHaveCount(0);await expect(page.getByText('Неоплачиваемое учебное сотрудничество',{exact:true})).toBeVisible();expect(rows[0].visibility).toBe('private');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
+});
+
+test('model work application persists without actor fields; support directory uses explicit filters',async({page})=>{
+ await setup(page,{signedIn:true});let application=null;
+ await page.route('**/rest/v1/work_opportunities*',r=>r.fulfill({json:[{id:'model-work',user_id:'employer',title:'Fashion film',type:'casting',audience:'Модели',target_kinds:['models'],compensation_type:'tfp',expenses_covered:'Travel',usage_rights:'Portfolio',deliverables:'Ten frames',created_at:new Date().toISOString()}]}));
+ await page.route('**/rest/v1/work_applications*',r=>{if(r.request().method()==='POST'){expect(r.request().postDataJSON()).toEqual({work_id:'model-work'});application={id:'application',status:'applied'};}return r.fulfill({json:application});});
+ await page.goto('/#/work/model-work');await expect(page.getByText('TFP / портфолио — без оплаты',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Откликнуться',exact:true}).click();await expect(page.getByText(/Отклик сохранён/)).toBeVisible();
+ const calls=[];await page.route('**/rest/v1/rpc/support_search',r=>{calls.push(r.request().postDataJSON());return r.fulfill({json:[{id:'rental',name:'Student rental',kind:'company',slug:'rental',description:'Equipment',terms:'By agreement'}]});});
+ await page.goto('/#/student-support');await page.getByLabel('Кто помогает').selectOption('company');await page.getByLabel('Тип поддержки').selectOption('rental_discount');await expect.poll(()=>calls.at(-1)?.p_type).toBe('rental_discount');await expect(page.getByText('Поддерживает студентов',{exact:true})).toBeVisible();
+});
+
 test('stored session survives network validation failure; retry, refresh and logout',async({page})=>{
   const state=await setup(page,{signedIn:true,validation:'network'}); await page.goto('/#/settings');
   await expect(page.getByRole('button',{name:'Профиль',exact:true})).toBeVisible();

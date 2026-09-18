@@ -141,6 +141,11 @@ export type MarketplaceListing = {
 };
 
 export type WorkOpportunity = {
+  target_kinds?: string[];
+  compensation_type?: string | null;
+  expenses_covered?: string | null;
+  usage_rights?: string | null;
+  deliverables?: string | null;
   id: string;
   organization_id?: string | null;
   user_id: string;

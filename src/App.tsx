@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { RouterProvider, useRouter, getActorIdFromPath, getRouteParam } from './router';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { OrganizationProvider } from './hooks/useOrganization';
@@ -11,6 +11,11 @@ import { WorkPage } from './pages/WorkPage';
 import { ResumesPage, PublicResumePage } from './pages/ResumesPage';
 import { OrganizationsPage } from './pages/OrganizationsPage';
 import { CompaniesPage, CompanyPage } from './pages/CompaniesPage';
+const ModelsPage = lazy(() => import('./pages/ModelsPage').then(m => ({ default: m.ModelsPage })));
+const ModelPage = lazy(() => import('./pages/ModelsPage').then(m => ({ default: m.ModelPage })));
+const StudentsPage = lazy(() => import('./pages/StudentsPage').then(m => ({ default: m.StudentsPage })));
+const StudentProjectsPage = lazy(() => import('./pages/StudentsPage').then(m => ({ default: m.StudentProjectsPage })));
+const StudentSupportPage = lazy(() => import('./pages/StudentsPage').then(m => ({ default: m.StudentSupportPage })));
 import { ProjectPage } from './pages/ProjectPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { MessagesPage } from './pages/MessagesPage';
@@ -54,6 +59,10 @@ function privateRouteMessage(path: string) {
 
 function PageRouter() {
   const { path } = useRouter();
+  const { user } = useAuth();
+  const modelId = getRouteParam(path, '/model');
+  if (modelId) return <ModelPage key={modelId} id={modelId} />;
+  if (path === '/model-settings' && user) return <ModelPage key={user.id} id={user.id} editable />;
 
   const actorId = getActorIdFromPath(path);
   if (actorId) return <ActorProfilePage actorId={actorId} />;
@@ -82,6 +91,10 @@ function PageRouter() {
       return <HomePage />;
     case '/pulse':
       return <PulsePage />;
+    case '/models': return <ModelsPage />;
+    case '/students': return <StudentsPage />;
+    case '/student-projects': return <StudentProjectsPage />;
+    case '/student-support': return <StudentSupportPage />;
     case '/actors':
       return <ActorsPage />;
     case '/professionals':
@@ -197,7 +210,7 @@ function AppContent() {
     <>
       <PrivateRouteGuard />
       <AppShell>
-        <PageRouter key={user?.id || 'guest'} />
+        <Suspense fallback={<p role="status" className="p-8">Загружаем раздел…</p>}><PageRouter key={user?.id || 'guest'} /></Suspense>
       </AppShell>
     </>
   );
