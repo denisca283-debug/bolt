@@ -27,3 +27,11 @@ checkout, bookings, metrics, email sending or unsupported workspace sections.
 New tables default deny; public APIs project only intentional public fields.
 Private helpers live outside exposed schemas. Sensitive multi-row writes use
 transactions and lock the organization (membership) or account (entitlements).
+
+## Review candidate
+
+Implemented phases 1–5 as a bounded foundation with functional core screens.
+See `product-layer-ii-review.md` for the complete 36-point report and explicit
+schema-only/unfinished areas; this ledger does not assert every requested UI is complete.
+Local database replay and adversarial tests pass; desktop/mobile browser fixtures
+pass. No live application or production readiness is implied by those checks.

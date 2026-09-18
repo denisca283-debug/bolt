@@ -8,7 +8,7 @@ import { HomePage } from './pages/HomePage';
 import { ActorsPage } from './pages/ActorsPage';
 import { ActorProfilePage } from './pages/ActorProfilePage';
 import { WorkPage } from './pages/WorkPage';
-import { ResumesPage } from './pages/ResumesPage';
+import { ResumesPage, PublicResumePage } from './pages/ResumesPage';
 import { OrganizationsPage } from './pages/OrganizationsPage';
 import { CompaniesPage, CompanyPage } from './pages/CompaniesPage';
 import { ProjectsPage } from './pages/ProjectsPage';
@@ -58,6 +58,8 @@ function PageRouter() {
   if (actorId) return <ActorProfilePage actorId={actorId} />;
 
   const publicSlug = getRouteParam(path, '/u');
+  const resumeId = getRouteParam(path, '/resume');
+  if (resumeId) return <PublicResumePage key={resumeId} id={resumeId} />;
   const companySlug = getRouteParam(path, '/company');
   if (companySlug) return <CompanyPage key={companySlug} slug={companySlug} />;
   if (publicSlug) return <ProfilePage slug={publicSlug} />;
@@ -155,7 +157,7 @@ function DeploymentConfigError() {
 }
 
 function AppContent() {
-  const { authLoading, isAuthenticated, supabaseReady } = useAuth();
+  const { authLoading, isAuthenticated, supabaseReady, user } = useAuth();
   const { path } = useRouter();
 
   if (!supabaseReady) return <DeploymentConfigError />;
@@ -188,7 +190,7 @@ function AppContent() {
     <>
       <PrivateRouteGuard />
       <AppShell>
-        <PageRouter />
+        <PageRouter key={user?.id || 'guest'} />
       </AppShell>
     </>
   );

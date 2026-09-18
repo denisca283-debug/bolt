@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { ModalShell } from '../components/ModalShell';
+import { useRouter } from '../router';
+import { MessageButton } from '../components/MessageButton';
 
 type Resume = { id: string; headline: string; custom_professions: string[]; cities: string[]; travel_ready: boolean; availability: string | null; rate_text: string | null; description: string; visibility: string; status: string };
 const statuses: Record<string, string> = { draft: 'Черновик', active: 'Опубликовано', paused: 'На паузе', closed: 'Закрыто', expired: 'Срок права на публикацию истёк' };
 const split = (value: string) => [...new Set(value.split(',').map(s => s.trim()).filter(Boolean))].slice(0, 20);
 
 export function ResumesPage({ create = false }: { create?: boolean }) {
+  const { navigate } = useRouter();
   const { user, profile } = useAuth();
   const [rows, setRows] = useState<Resume[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +56,7 @@ export function ResumesPage({ create = false }: { create?: boolean }) {
       <p className="whitespace-pre-wrap">{row.description}</p>
       <div className="flex flex-wrap gap-3">
         <button className="btn-secondary" disabled={busy} onClick={() => setEditing(row)}>Редактировать</button>
+        {row.status === 'active' && <button className="btn-secondary" onClick={() => navigate('/resume/' + row.id)}>Открыть публикацию</button>}
         {row.status !== 'active' && <button className="btn-primary" disabled={busy} onClick={() => void transition(row, 'active')}>Опубликовать</button>}
         {row.status === 'active' && <button className="btn-secondary" disabled={busy} onClick={() => void transition(row, 'paused')}>Приостановить</button>}
         {row.status !== 'closed' && <button className="btn-secondary" disabled={busy} onClick={() => void transition(row, 'closed')}>Закрыть</button>}
@@ -65,6 +69,20 @@ export function ResumesPage({ create = false }: { create?: boolean }) {
       <button className="btn-secondary mt-4" onClick={() => setPaywall(false)}>Вернуться к черновику</button>
     </ModalShell>}
   </section>;
+}
+
+export function PublicResumePage({ id }: { id: string }) {
+  const [row, setRow] = useState<(Resume & { user_id: string }) | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => { let stale = false; setRow(null); setError(''); setLoading(true); void (async () => {
+    try { const r = await supabase.from('resume_publications').select('id,user_id,headline,custom_professions,cities,travel_ready,availability,rate_text,description,visibility,status').eq('id', id).maybeSingle(); if (r.error) throw r.error; if (!stale) setRow(r.data); }
+    catch { if (!stale) setError('Не удалось загрузить публикацию.'); }
+    finally { if (!stale) setLoading(false); }
+  })(); return () => { stale = true; }; }, [id]);
+  if (loading) return <p className="p-8" role="status">Загружаем резюме…</p>;
+  if (!row) return <p className="p-8">{error || 'Резюме не опубликовано или недоступно.'}</p>;
+  return <article className="surface max-w-3xl mx-auto p-6 space-y-4"><h1 className="font-display text-2xl">{row.headline}</h1><p>{row.custom_professions.join(' · ')}</p><p>{row.cities.join(', ')}{row.travel_ready ? ' · Готовность к командировкам' : ''}</p><p>{row.availability}</p><p>{row.rate_text}</p><p className="whitespace-pre-wrap">{row.description}</p><MessageButton targetUserId={row.user_id} /></article>;
 }
 
 function ResumeEditor({ initial, onClose, onSaved }: { initial: Resume; onClose: () => void; onSaved: () => void }) {

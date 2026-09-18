@@ -116,6 +116,7 @@ test('Resume opens dedicated creation, persists draft, and shows honest entitlem
   await page.getByRole('button',{name:'Опубликовать',exact:true}).click();
   await expect(page.getByRole('dialog').getByText(/Оплата пока не подключена/)).toBeVisible();
   expect(rows).toHaveLength(1); expect(rows[0].status).toBe('draft');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 });
 
 test('multi-company context freezes publication author; payload names company not employee ownership',async({page})=>{
@@ -146,4 +147,5 @@ test('company public page shows only safe projection and approved badge',async({
   await expect(page.getByRole('heading',{name:'Оборудование и предложения аренды'})).toBeVisible();
   await expect(page.getByText('Проверена',{exact:false})).toHaveCount(0);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize().width);
 });
