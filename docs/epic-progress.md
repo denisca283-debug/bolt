@@ -1,5 +1,20 @@
 # FilmVerse epic — first review packet
 
+## Final foundation gate (2026-09-18, prepared; NOT applied)
+
+See [final gate review](foundation-gate-review.md) and
+[live acceptance checklist](foundation-live-acceptance.md).
+This supersedes earlier counts/public-plan statements below: 53 automated tests
+pass, full chronological replay succeeds, public plan/internal flags are removed,
+server-owned entitlements exist without paid backfill, internal permission reads
+are owner-only, and Pulse NULL-owner client INSERT is denied.
+Auth preserves live sessions on temporary validation failure with a retry warning;
+invalid tokens, expiry and sign-out become guests. SDK SIGNED_IN hydration races
+are covered. Existing messaging convergence and historical 011 are unchanged.
+Browser fixtures verified manually; standalone Chromium launch is sandbox-blocked.
+Automated browser suite and secret-free CI workflow added, CI result pending.
+STOP for architectural review: no merge, no production migration, no product expansion.
+
 ## Continuation: messaging schema convergence (prepared, NOT applied)
 
 Added `20260918212540_messaging_schema_convergence.sql` without changing 011.

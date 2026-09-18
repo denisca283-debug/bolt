@@ -47,6 +47,8 @@ test('profile security: real PostgreSQL column grants plus owner RLS', async (t)
       await as(null, 'anon');
       assert.equal((await sql(`SELECT ${PROFILE_FIELDS} FROM profiles`)).rows.length, 2);
       await denied('SELECT date_of_birth FROM profiles');
+      await denied('SELECT plan FROM profiles');
+      await denied('SELECT onboarding_completed FROM profiles');
       await denied('SELECT * FROM profiles');
       await denied("SELECT id FROM profiles WHERE date_of_birth = '1990-01-02'");
       await denied('SELECT id FROM profiles ORDER BY date_of_birth');
@@ -69,7 +71,8 @@ test('profile security: real PostgreSQL column grants plus owner RLS', async (t)
       await denied("INSERT INTO profiles(id,plan) VALUES ($1,'pro')", [c]);
       await denied("INSERT INTO profiles(id,full_name) VALUES ($1,'Forged')", [a]);
       const created = await sql(`INSERT INTO profiles(id,full_name,public_slug,onboarding_completed) VALUES ($1,'C','c',false) RETURNING ${PROFILE_FIELDS}`, [c]);
-      assert.equal(created.rows[0].plan, 'free');
+      assert.equal(created.rows[0].id, c);
+      assert.equal(created.rows[0].plan, undefined);
       await denied("INSERT INTO profiles(id,plan) VALUES ($1,'pro') ON CONFLICT(id) DO UPDATE SET plan=excluded.plan", [c]);
       await denied("UPDATE profiles SET full_name='C' WHERE id=$1 RETURNING *", [c]);
     });
@@ -100,6 +103,8 @@ test('profile security: real PostgreSQL column grants plus owner RLS', async (t)
 
 test('browser profile projection excludes private date and wildcard reads', async () => {
   assert.ok(!PROFILE_FIELDS.includes('date_of_birth'));
+  assert.ok(!PROFILE_FIELDS.includes('plan'));
+  assert.ok(!PROFILE_FIELDS.includes('onboarding_completed'));
   for (const file of ['src/hooks/useAuth.tsx', 'src/pages/ProfilePage.tsx']) {
     const source = await readFile(file, 'utf8');
     assert.match(source, /from\('profiles'\)\.?(?:\s*)select\(PROFILE_FIELDS\)|from\('profiles'\)\s*\.select\(PROFILE_FIELDS\)/);

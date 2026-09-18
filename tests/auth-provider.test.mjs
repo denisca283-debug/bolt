@@ -32,10 +32,14 @@ async function mount(options = {}) {
   fixture.client = {
     auth: {
       getSession: async () => options.hydration ? options.hydration : { data: { session: fixture.session }, error: null },
-      getUser: async () => ({ data: { user: fixture.userError ? null : fixture.session?.user }, error: fixture.userError }),
+      getUser: async (token) => {
+        if (options.validation && token === 'test-access-token') return options.validation;
+        if (fixture.userError?.throw) throw fixture.userError;
+        return { data: { user: fixture.userError ? null : fixture.session?.user }, error: fixture.userError };
+      },
       onAuthStateChange: (callback) => {
         fixture.callback = callback;
-        queueMicrotask(() => callback('INITIAL_SESSION', fixture.session));
+        queueMicrotask(() => callback(options.initialEvent ?? 'INITIAL_SESSION', fixture.session));
         return { data: { subscription: { unsubscribe() { fixture.callback = null; } } } };
       },
       signUp: async () => ({ data: { user: { id: options.fake ? 'obfuscated' : 'new' }, session: null }, error: null }),
@@ -68,7 +72,7 @@ async function mount(options = {}) {
   const module = { exports: {} };
   vm.runInNewContext(bundle.outputFiles[0].text, {
     module, exports: module.exports, require, fixture, console,
-    window: { setTimeout, clearTimeout, location: { origin: 'https://filmverse.example', hash: '' } }, setTimeout, clearTimeout,
+    window: { setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {}, location: { origin: 'https://filmverse.example', hash: '' } }, setTimeout, clearTimeout,
   });
   const { AuthProvider, useAuth } = module.exports;
   function Probe() { fixture.value = useAuth(); return null; }
@@ -126,7 +130,7 @@ test('provider: token refresh from another tab uses the new real session', async
 });
 test('provider: invalid or expired stored sessions are guests', async () => {
   for (const options of [
-    { session: validSession(), userError: new Error('invalid JWT') },
+    { session: validSession(), userError: { code: 'bad_jwt', status: 401 } },
     { session: { ...validSession(), expires_at: 1 } },
   ]) {
     const f = await mount(options);
@@ -179,4 +183,52 @@ test('provider: a stale hydration response cannot undo logout', async () => {
     assert.equal(f.value.isAuthenticated, false);
     assert.equal(f.value.user, null);
   } finally { f.close(); }
+});
+
+test('provider: temporary validation errors preserve a live session, safe retry clears warning', async () => {
+  for (const userError of [
+    { name: 'AuthRetryableFetchError', status: 0 },
+    { name: 'TypeError', message: 'Failed to fetch', throw: true },
+    { status: 503 }, { status: 429 },
+  ]) {
+    const f=await mount({session:validSession(),userError});
+    try {
+      assert.equal(f.value.isAuthenticated,true); assert.ok(f.value.connectivityWarning);
+      f.userError=null;
+      await act(async()=>{ await f.value.retryAuth(); });
+      assert.equal(f.value.isAuthenticated,true); assert.equal(f.value.connectivityWarning,null);
+    } finally { f.close(); }
+  }
+});
+test('provider: SIGNED_OUT and TOKEN_REFRESHED supersede pending getUser validation',async()=>{
+  for(const event of ['SIGNED_OUT','TOKEN_REFRESHED']) {
+    let resolve; const validation=new Promise(r=>{resolve=r;});
+    const f=await mount({session:validSession(),validation});
+    try {
+      const refreshed={...validSession(),access_token:'new-token'};
+      await f.emit(event,event==='SIGNED_OUT'?null:refreshed);
+      await act(async()=>{resolve({data:{user:null},error:{code:'bad_jwt',status:401}});});
+      assert.equal(f.value.isAuthenticated,event!=='SIGNED_OUT');
+      assert.equal(f.value.session?.access_token,event==='SIGNED_OUT'?undefined:'new-token');
+    } finally { f.close(); }
+  }
+});
+test('provider: offline validation cannot extend token expiry',async()=>{
+  const f=await mount({session:{...validSession(),expires_at:(Date.now()+100)/1000},userError:{status:503}});
+  try {
+    assert.equal(f.value.isAuthenticated,true);
+    await act(async()=>{await new Promise(r=>setTimeout(r,150));});
+    assert.equal(f.value.isAuthenticated,false); assert.equal(f.value.user,null);
+  } finally {f.close();}
+});
+test('provider: SDK SIGNED_IN during hydration and visibility still validates, preserving warnings',async()=>{
+  const f=await mount({session:validSession(),initialEvent:'SIGNED_IN',userError:{status:503}});
+  try {
+    assert.equal(f.value.isAuthenticated,true); assert.ok(f.value.connectivityWarning);
+    await f.emit('SIGNED_IN',f.session);
+    assert.equal(f.value.isAuthenticated,true); assert.ok(f.value.connectivityWarning);
+    f.userError={code:'session_not_found',status:403};
+    await f.emit('SIGNED_IN',f.session);
+    assert.equal(f.value.isAuthenticated,false); assert.equal(f.value.connectivityWarning,null);
+  } finally {f.close();}
 });

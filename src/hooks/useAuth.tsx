@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { classifySignup, classifyProfile, ensureProfile, liveSession, type SignupOutcome, type ProfileResult } from '../lib/auth-state';
+import { classifySignup, classifyProfile, ensureProfile, liveSession, isInvalidSessionError, type SignupOutcome, type ProfileResult } from '../lib/auth-state';
 import type { Profile } from '../types';
 import { PROFILE_FIELDS } from '../lib/profile-fields';
 
@@ -14,6 +14,8 @@ type AuthContextValue = {
   profileStatus: ProfileResult<Profile>['status'] | 'LOADING' | 'IDLE';
   profileError: string | null;
   authError: string | null;
+  connectivityWarning: string | null;
+  retryAuth: () => Promise<void>;
   supabaseReady: boolean;
   isAuthenticated: boolean;
   passwordRecoveryActive: boolean;
@@ -35,6 +37,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [connectivityWarning, setConnectivityWarning] = useState<string | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  const authRevisionRef = useRef(0);
+  const retryAuthRef = useRef<() => Promise<void>>(async () => {});
+  const retryAuth = useCallback(() => retryAuthRef.current(), []);
   const [profileState, setProfileState] = useState<{
     userId: string | null; result: ProfileResult<Profile> | null; loading: boolean;
   }>({ userId: null, result: null, loading: false });
@@ -46,47 +53,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isSupabaseConfigured) { setAuthLoading(false); return; }
     let disposed = false;
-    let revision = 0;
     const apply = (next: Session | null) => {
       if (disposed) return;
       const valid = liveSession(next);
       activeUserRef.current = valid?.user.id ?? null;
+      sessionRef.current = valid;
       setSession(valid);
       setAuthLoading(false);
     };
+    let checkingRevision: number | null = null;
+    const validate = async (candidate: Session, revision: number) => {
+      if (disposed || authRevisionRef.current !== revision || checkingRevision === revision) return;
+      checkingRevision = revision;
+      const current = () => !disposed && authRevisionRef.current === revision;
+      try {
+        const validated = await supabase.auth.getUser(candidate.access_token);
+        if (!current()) return;
+        if (validated.error) throw validated.error;
+        if (validated.data.user?.id !== candidate.user.id) {
+          setConnectivityWarning(null);
+          apply(null);
+          return;
+        }
+        setConnectivityWarning(null);
+        apply(candidate);
+      } catch (error) {
+        if (!current()) return;
+        if (isInvalidSessionError(error) || !liveSession(candidate)) {
+          setConnectivityWarning(null);
+          apply(null);
+        } else {
+          apply(candidate);
+          setConnectivityWarning('Не удалось проверить соединение с FilmVerse. Вход сохранён до истечения сессии.');
+        }
+      } finally {
+        if (checkingRevision === revision) checkingRevision = null;
+      }
+    };
+    const retry = async () => {
+      const candidate = liveSession(sessionRef.current);
+      if (!candidate || disposed) return;
+      await validate(candidate, authRevisionRef.current);
+    };
+    retryAuthRef.current = retry;
+    const online = () => { void retry(); };
+    window.addEventListener('online', online);
     // Subscribe first. An older hydration result must never resurrect a signed-out session.
     const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
       // Initial storage hydration is validated by getSession/getUser below.
       // Ignore its duplicate event so it cannot override a newer sign-in/out.
       if (event === 'INITIAL_SESSION') return;
-      revision++;
+      const revision = ++authRevisionRef.current;
+      const candidate = event === 'SIGNED_OUT' ? null : liveSession(next);
+      if (!candidate) setConnectivityWarning(null);
       if (event === 'SIGNED_OUT' || !next) setPasswordRecoveryActive(false);
       if (event === 'PASSWORD_RECOVERY' && liveSession(next)) {
         setPasswordRecoveryActive(true);
         window.location.hash = '/reset-password';
       }
-      apply(event === 'SIGNED_OUT' ? null : next);
+      apply(candidate);
+      // SDK storage recovery/visibility can emit SIGNED_IN before getSession
+      // resolves. Every replacement session must still be validated. Defer
+      // Auth API work until outside the SDK's synchronous event callback.
+      if (candidate) void Promise.resolve().then(() => validate(candidate, revision));
     });
-    const initialRevision = revision;
+    const initialRevision = authRevisionRef.current;
     void (async () => {
       try {
         const { data, error } = await supabase.auth.getSession();
-        if (disposed || revision !== initialRevision) return;
+        if (disposed || authRevisionRef.current !== initialRevision) return;
         if (error) throw error;
-        if (data.session) {
-          const validated = await supabase.auth.getUser();
-          if (disposed || revision !== initialRevision) return;
-          if (validated.error || !validated.data.user) { apply(null); return; }
-        }
-        apply(data.session);
+        const candidate = liveSession(data.session);
+        apply(candidate);
+        if (candidate) await validate(candidate, initialRevision);
       } catch {
-        if (!disposed && revision === initialRevision) {
+        if (!disposed && authRevisionRef.current === initialRevision) {
           setAuthError('Не удалось проверить вход. Попробуйте обновить страницу.');
           apply(null);
         }
       }
     })();
-    return () => { disposed = true; listener.subscription.unsubscribe(); };
+    return () => {
+      disposed = true;
+      retryAuthRef.current = async () => {};
+      window.removeEventListener('online', online);
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   // Expiry cannot leave authenticated chrome indefinitely if refresh fails/offline.
@@ -94,8 +146,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!session?.expires_at) return;
     const delay = Math.max(0, session.expires_at * 1000 - Date.now());
     const timer = window.setTimeout(() => {
+      authRevisionRef.current++;
+      sessionRef.current = null;
       activeUserRef.current = null;
       setSession(null);
+      setConnectivityWarning(null);
+      setPasswordRecoveryActive(false);
     }, Math.min(delay, 2147483647));
     return () => window.clearTimeout(timer);
   }, [session]);
@@ -146,12 +202,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: liveSession(data.session) ? null : 'Не удалось подтвердить вход. Попробуйте ещё раз.' };
   }, []);
   const signOut = useCallback(async () => {
+    authRevisionRef.current++;
     setAuthError(null);
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
       // SDK sign-out succeeded; clear even if an event is delayed.
       activeUserRef.current = null;
+      sessionRef.current = null;
+      authRevisionRef.current++;
+      setConnectivityWarning(null);
       requestRef.current++;
       setSession(null);
       setPasswordRecoveryActive(false);
@@ -180,10 +240,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileStatus = profileLoading ? 'LOADING' : result?.status ?? 'IDLE';
   const isAuthenticated = !!liveSession(session);
   const value = useMemo<AuthContextValue>(() => ({
-    user, session, profile, authLoading, profileLoading, profileStatus, profileError, authError,
+    user, session, profile, authLoading, profileLoading, profileStatus, profileError, authError, connectivityWarning, retryAuth,
     supabaseReady: isSupabaseConfigured, isAuthenticated, passwordRecoveryActive,
     signUp, signIn, signOut, resetPassword, updatePassword, refreshProfile,
-  }), [user, session, profile, authLoading, profileLoading, profileStatus, profileError, authError,
+  }), [user, session, profile, authLoading, profileLoading, profileStatus, profileError, authError, connectivityWarning, retryAuth,
     isAuthenticated, passwordRecoveryActive, signUp, signIn, signOut, resetPassword, updatePassword, refreshProfile]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

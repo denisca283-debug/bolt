@@ -1,4 +1,14 @@
 export type AuthSession = { user: { id: string }; access_token: string; expires_at?: number };
+/** Only explicit authentication rejection invalidates a still-live stored session.
+ * Network, rate-limit and server errors mean validation is unavailable, not logout.
+ */
+export function isInvalidSessionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { code?: string; status?: number; name?: string };
+  return e.status === 401 || e.name === 'AuthSessionMissingError' ||
+    ['bad_jwt', 'session_not_found', 'session_expired', 'refresh_token_not_found',
+      'refresh_token_already_used', 'user_not_found', 'user_banned'].includes(e.code || '');
+}
 export function liveSession<T extends AuthSession>(session: T | null, now = Date.now()): T | null {
   return session?.user?.id && session.access_token &&
     (!session.expires_at || session.expires_at * 1000 > now) ? session : null;

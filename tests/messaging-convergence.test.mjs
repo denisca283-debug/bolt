@@ -36,7 +36,7 @@ test('full migration replay and messaging convergence: A/B/C/D authorization', a
   await db.exec(bootstrap);
   const files = (await readdir(directory)).filter(f=>f.endsWith('.sql')).sort();
   const name = files.find(f=>f.endsWith('_messaging_schema_convergence.sql'));
-  for (const file of files.filter(f=>f!==name)) await db.exec(await readFile(new URL(file,directory),'utf8'));
+  for (const file of files) await db.exec(await readFile(new URL(file,directory),'utf8'));
   for (const [i,id] of ids.entries()) {
     await q('INSERT INTO auth.users VALUES($1)',[id]);
     await q('INSERT INTO profiles(id,full_name) VALUES($1,$2)',[id,['Alice','Bob','Carol','Dan'][i]]);

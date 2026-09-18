@@ -8,8 +8,9 @@ allowed owners to supply `plan`; broad SELECT exposed `date_of_birth`. The new
 privileges, then grants a positive list. Own-row policies remain in effect.
 No rows/columns are deleted and no stored plan/date values are rewritten.
 
-Client SELECT: professional fields, legacy plan and timestamps, excluding birth
-date. Client INSERT: own ID and editable professional fields. Client UPDATE:
+Client SELECT: professional fields and timestamps, excluding birth date, legacy
+plan and internal onboarding state (tightened by the final foundation gate).
+Client INSERT: own ID and editable professional fields. Client UPDATE:
 editable professional fields only. No client DELETE/TRUNCATE. Unknown future
 columns are not automatically included. Service-role privileges are unchanged.
 
@@ -58,6 +59,10 @@ migration will break profile hydration (but must not fake logout). A DB rollback
 that restores blanket grants would reopen the vulnerabilities and is not supplied.
 
 ## Remaining gates
+
+Historical findings below describe this earlier packet. The
+[final foundation gate](foundation-gate-review.md) supersedes the missing
+entitlement/full-replay/convergence work; live acceptance is still outstanding.
 
 - Historical `plan='pro'` may have been self-assigned. Do NOT backfill paid
   entitlements from it or claim a payment was verified; build server-owned evidence.

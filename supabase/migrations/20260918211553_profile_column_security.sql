@@ -20,7 +20,7 @@ END $$;
 -- selected, filtered, sorted, or returned through the client Data API.
 GRANT SELECT (
   id, full_name, public_slug, city, country, gender, avatar_url, about,
-  availability_status, onboarding_completed, plan, created_at, updated_at
+  availability_status, created_at, updated_at
 ) ON public.profiles TO anon, authenticated;
 
 -- Own-row RLS remains mandatory. ID only belongs in INSERT, never UPDATE.

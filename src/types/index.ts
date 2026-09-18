@@ -8,9 +8,6 @@ export type Profile = {
   avatar_url: string | null;
   about: string | null;
   availability_status: 'available' | 'busy' | 'limited';
-  onboarding_completed: boolean;
-  // Legacy display-only value. Never use as an entitlement or permission.
-  plan?: 'free' | 'pro';
   created_at: string;
   updated_at: string;
 };
