@@ -12,9 +12,7 @@ type TypeDef = {
 };
 
 /**
- * The two verifications FilmVerse checks today. Passing BOTH is what the
- * product calls "двойная верификация" — it is what unlocks department chats,
- * and the rule is enforced in the database, not only here.
+ * Verification status is independent of payment and discussion permissions.
  */
 const TYPES: TypeDef[] = [
   {
@@ -39,7 +37,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function VerificationPanel() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const [records, setRecords] = useState<VerificationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyType, setBusyType] = useState<string | null>(null);
@@ -73,7 +71,6 @@ export function VerificationPanel() {
     records.filter((r) => r.status === 'approved').map((r) => r.verification_type)
   );
   const doubleVerified = approvedTypes.size >= 2;
-  const isPro = profile?.plan === 'pro';
 
   const submit = async (type: string) => {
     if (!userId) return;
@@ -211,10 +208,9 @@ export function VerificationPanel() {
           </p>
         </div>
         <p className="text-xs text-txt-secondary leading-relaxed">
-          Две разные пройденные верификации вместе с подпиской Про открывают чаты департаментов —
-          рассылку целому отделу. Это защита от спама: новый непроверенный аккаунт не может
-          написать всему цеху.
-          {!isPro && doubleVerified && ' Верификации есть — остаётся подписка Про.'}
+          Верификация подтверждает личность и профессиональный опыт. Создание обсуждений
+          департамента требует отдельного разрешения FilmVerse. Подписка PRO не покупает
+          верификацию и не предоставляет это разрешение.
         </p>
       </div>
     </div>

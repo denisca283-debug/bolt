@@ -72,7 +72,7 @@ export async function createGroupChat(params: {
     return {
       roomId: null,
       error: params.departmentId
-        ? readableError(error, 'База не разрешила создать чат департамента. Нужны подписка Про и две пройденные верификации.')
+        ? readableError(error, 'Для создания обсуждения департамента требуется отдельное разрешение FilmVerse.')
         : readableError(error, 'Не удалось создать чат. Попробуйте ещё раз.'),
     };
   }

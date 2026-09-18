@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useAuthModal } from '../components/AuthModal';
 import { useRouter } from '../router';
 import { supabase } from '../lib/supabase';
+import { PROFILE_FIELDS } from '../lib/profile-fields';
 import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
 import { SkillsPicker } from '../components/profile/SkillsPicker';
 import { MessageButton } from '../components/MessageButton';
@@ -203,7 +204,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     // Public profile lookup by slug — must work for guests too.
     const { data: profileRow, error: profileErr } = await supabase
       .from('profiles')
-      .select('*')
+      .select(PROFILE_FIELDS)
       .eq('public_slug', slug)
       .maybeSingle();
 
@@ -1016,4 +1017,3 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
     </div>
   );
 }
-

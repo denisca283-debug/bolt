@@ -3,6 +3,7 @@ import { useRouter } from '../router';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { MobileNav } from './MobileNav';
+import { useAuth } from '../hooks/useAuth';
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -11,6 +12,7 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { path } = useRouter();
+  const { profileError, authError, refreshProfile, profileLoading, connectivityWarning, retryAuth } = useAuth();
 
   const isHomepage = path === '/';
 
@@ -25,6 +27,17 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex flex-1 flex-col min-w-0">
         <TopBar onMenuClick={() => setMobileNavOpen(true)} />
         <main key={path} className="flex-1 overflow-y-auto">
+          {connectivityWarning && <div role="status" className="m-4 rounded-xl border border-warn-600/30 p-4 text-sm text-txt-primary">
+            <p>{connectivityWarning}</p>
+            <button className="btn-secondary mt-2" onClick={() => void retryAuth()}>Повторить проверку соединения</button>
+          </div>}
+          {(profileError || authError) && (
+            <div role="alert" className="m-4 rounded-xl border border-warn-600/30 p-4 text-sm text-txt-primary">
+              <p>{profileError || authError}</p>
+              {profileError && <button className="btn-secondary mt-2" disabled={profileLoading}
+                onClick={() => void refreshProfile()}>Повторить загрузку профиля</button>}
+            </div>
+          )}
           {isHomepage ? (
             children
           ) : (

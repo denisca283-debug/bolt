@@ -1,5 +1,6 @@
+import { ModalShell } from '../ModalShell';
 import { useState, useEffect } from 'react';
-import { X, Search, Check, Lock, Loader2, Users, MessageSquare, Building2 } from 'lucide-react';
+import { Search, Check, Lock, Loader2, Users, MessageSquare, Building2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { openDirectChat, createGroupChat } from '../../lib/chat';
 import { Avatar } from '../ui';
@@ -120,18 +121,8 @@ export function NewChatDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-base-950/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg surface p-6 animate-scale-in max-h-[85vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-txt-muted hover:text-txt-primary transition-colors"
-          aria-label="Закрыть"
-        >
-          <X className="h-5 w-5" />
-        </button>
+    <ModalShell title="Новый чат" onClose={onClose} width="max-w-lg">
 
-        <h2 className="font-display text-xl font-semibold text-txt-primary mb-4">Новый чат</h2>
 
         {/* Kind */}
         <div className="grid grid-cols-3 gap-2 mb-5">
@@ -274,7 +265,6 @@ export function NewChatDialog({
         <button onClick={handleCreate} disabled={!canSubmit} className="btn-primary w-full">
           {creating ? <><Loader2 className="h-4 w-4 animate-spin" /> Создание…</> : 'Создать чат'}
         </button>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

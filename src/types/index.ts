@@ -4,14 +4,10 @@ export type Profile = {
   public_slug: string | null;
   city: string | null;
   country: string | null;
-  date_of_birth: string | null;
   gender: string | null;
   avatar_url: string | null;
   about: string | null;
   availability_status: 'available' | 'busy' | 'limited';
-  onboarding_completed: boolean;
-  // Added by the chat migration; absent on databases that haven't run it yet.
-  plan?: 'free' | 'pro';
   created_at: string;
   updated_at: string;
 };

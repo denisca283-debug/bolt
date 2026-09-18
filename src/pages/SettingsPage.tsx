@@ -2,6 +2,7 @@ import { Settings, Globe, Share2, Mail, LogOut, Star, Check } from 'lucide-react
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { VerificationPanel } from '../components/VerificationPanel';
+import { useEntitlements } from '../hooks/useEntitlements';
 
 export function SettingsPage() {
   const { user, profile, signOut } = useAuth();
@@ -18,7 +19,7 @@ export function SettingsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isPro = profile?.plan === 'pro';
+  const { isPro, loading: entitlementLoading, error: entitlementError } = useEntitlements(user?.id);
 
   return (
     <div className="animate-fade-in max-w-2xl">
@@ -53,9 +54,9 @@ export function SettingsPage() {
               <Star className={`h-4 w-4 ${isPro ? 'text-emerald-500' : 'text-txt-secondary'}`} strokeWidth={1.6} />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm text-txt-primary">{isPro ? 'Про' : 'Бесплатный'}</p>
+              <p className="text-sm text-txt-primary">{entitlementLoading ? 'Проверяем доступ…' : entitlementError ? 'Статус доступа недоступен' : isPro ? 'Про' : 'Бесплатный'}</p>
               <p className="text-xs text-txt-muted mt-0.5">
-                {isPro ? 'Открыты чаты департаментов при двойной верификации' : 'Оплата подписки пока не подключена'}
+                {entitlementError ? 'Обновите страницу, чтобы повторить проверку. Вход сохранён.' : 'Оплата подписки пока не подключена. PRO не предоставляет модераторские права.'}
               </p>
             </div>
           </div>

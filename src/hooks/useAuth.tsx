@@ -1,7 +1,9 @@
-import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { classifySignup, classifyProfile, ensureProfile, liveSession, isInvalidSessionError, type SignupOutcome, type ProfileResult } from '../lib/auth-state';
 import type { Profile } from '../types';
+import { PROFILE_FIELDS } from '../lib/profile-fields';
 
 type AuthContextValue = {
   user: User | null;
@@ -9,317 +11,250 @@ type AuthContextValue = {
   profile: Profile | null;
   authLoading: boolean;
   profileLoading: boolean;
+  profileStatus: ProfileResult<Profile>['status'] | 'LOADING' | 'IDLE';
   profileError: string | null;
+  authError: string | null;
+  connectivityWarning: string | null;
+  retryAuth: () => Promise<void>;
   supabaseReady: boolean;
   isAuthenticated: boolean;
   passwordRecoveryActive: boolean;
-  signUp: (fullName: string, email: string, password: string) => Promise<{ error: string | null; needsEmailConfirm: boolean }>;
+  signUp: (fullName: string, email: string, password: string) => Promise<{ error: string | null; outcome: SignupOutcome }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
   refreshProfile: () => Promise<void>;
 };
-
-type ProfileFetchResult =
-  | { status: 'found'; profile: Profile }
-  | { status: 'missing' }
-  | { status: 'error'; message: string };
-
 const AuthContext = createContext<AuthContextValue | null>(null);
-
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
   const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [connectivityWarning, setConnectivityWarning] = useState<string | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  const authRevisionRef = useRef(0);
+  const retryAuthRef = useRef<() => Promise<void>>(async () => {});
+  const retryAuth = useCallback(() => retryAuthRef.current(), []);
+  const [profileState, setProfileState] = useState<{
+    userId: string | null; result: ProfileResult<Profile> | null; loading: boolean;
+  }>({ userId: null, result: null, loading: false });
+  const requestRef = useRef(0);
+  const activeUserRef = useRef<string | null>(null);
+  const user = session?.user ?? null;
+  const userId = user?.id;
 
-  // Supabase session is the only authentication source of truth.
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured) { setAuthLoading(false); return; }
+    let disposed = false;
+    const apply = (next: Session | null) => {
+      if (disposed) return;
+      const valid = liveSession(next);
+      activeUserRef.current = valid?.user.id ?? null;
+      sessionRef.current = valid;
+      setSession(valid);
       setAuthLoading(false);
-      return;
-    }
-
-    let mounted = true;
-
-    supabase.auth
-      .getSession()
-      .then(({ data, error }) => {
-        if (!mounted) return;
-        if (error) {
-          console.error('getSession error:', error.message);
-          setSession(null);
-          setUser(null);
+    };
+    let checkingRevision: number | null = null;
+    const validate = async (candidate: Session, revision: number) => {
+      if (disposed || authRevisionRef.current !== revision || checkingRevision === revision) return;
+      checkingRevision = revision;
+      const current = () => !disposed && authRevisionRef.current === revision;
+      try {
+        const validated = await supabase.auth.getUser(candidate.access_token);
+        if (!current()) return;
+        if (validated.error) throw validated.error;
+        if (validated.data.user?.id !== candidate.user.id) {
+          setConnectivityWarning(null);
+          apply(null);
           return;
         }
-        setSession(data.session);
-        setUser(data.session?.user ?? null);
-      })
-      .catch((error: unknown) => {
-        if (!mounted) return;
-        console.error('getSession failed:', error);
-        setSession(null);
-        setUser(null);
-      })
-      .finally(() => {
-        if (mounted) setAuthLoading(false);
-      });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
-      setSession((prev) => {
-        if (!newSession) return null;
-        if (
-          prev?.access_token === newSession.access_token &&
-          prev?.refresh_token === newSession.refresh_token
-        ) {
-          return prev;
+        setConnectivityWarning(null);
+        apply(candidate);
+      } catch (error) {
+        if (!current()) return;
+        if (isInvalidSessionError(error) || !liveSession(candidate)) {
+          setConnectivityWarning(null);
+          apply(null);
+        } else {
+          apply(candidate);
+          setConnectivityWarning('Не удалось проверить соединение с FilmVerse. Вход сохранён до истечения сессии.');
         }
-        return newSession;
-      });
-
-      setUser((prev) => {
-        if (!newSession) return null;
-        return prev?.id === newSession.user.id ? prev : newSession.user;
-      });
-
-      if (!newSession) {
-        setProfile(null);
-        setProfileError(null);
+      } finally {
+        if (checkingRevision === revision) checkingRevision = null;
       }
-
-      if (event === 'SIGNED_OUT') {
-        setPasswordRecoveryActive(false);
-      }
-
-      if (event === 'PASSWORD_RECOVERY' && newSession) {
+    };
+    const retry = async () => {
+      const candidate = liveSession(sessionRef.current);
+      if (!candidate || disposed) return;
+      await validate(candidate, authRevisionRef.current);
+    };
+    retryAuthRef.current = retry;
+    const online = () => { void retry(); };
+    window.addEventListener('online', online);
+    // Subscribe first. An older hydration result must never resurrect a signed-out session.
+    const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
+      // Initial storage hydration is validated by getSession/getUser below.
+      // Ignore its duplicate event so it cannot override a newer sign-in/out.
+      if (event === 'INITIAL_SESSION') return;
+      const revision = ++authRevisionRef.current;
+      const candidate = event === 'SIGNED_OUT' ? null : liveSession(next);
+      if (!candidate) setConnectivityWarning(null);
+      if (event === 'SIGNED_OUT' || !next) setPasswordRecoveryActive(false);
+      if (event === 'PASSWORD_RECOVERY' && liveSession(next)) {
         setPasswordRecoveryActive(true);
         window.location.hash = '/reset-password';
       }
-
-      setAuthLoading(false);
+      apply(candidate);
+      // SDK storage recovery/visibility can emit SIGNED_IN before getSession
+      // resolves. Every replacement session must still be validated. Defer
+      // Auth API work until outside the SDK's synchronous event callback.
+      if (candidate) void Promise.resolve().then(() => validate(candidate, revision));
     });
-
+    const initialRevision = authRevisionRef.current;
+    void (async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (disposed || authRevisionRef.current !== initialRevision) return;
+        if (error) throw error;
+        const candidate = liveSession(data.session);
+        apply(candidate);
+        if (candidate) await validate(candidate, initialRevision);
+      } catch {
+        if (!disposed && authRevisionRef.current === initialRevision) {
+          setAuthError('Не удалось проверить вход. Попробуйте обновить страницу.');
+          apply(null);
+        }
+      }
+    })();
     return () => {
-      mounted = false;
+      disposed = true;
+      retryAuthRef.current = async () => {};
+      window.removeEventListener('online', online);
       listener.subscription.unsubscribe();
     };
   }, []);
 
-  const userId = user?.id;
-
-  // Profile state is separate from auth state. A profile/RLS/network failure
-  // must never log the user out or be treated as "profile does not exist".
+  // Expiry cannot leave authenticated chrome indefinitely if refresh fails/offline.
   useEffect(() => {
-    if (!userId || !user) {
-      setProfile(null);
-      setProfileLoading(false);
-      setProfileError(null);
+    if (!session?.expires_at) return;
+    const delay = Math.max(0, session.expires_at * 1000 - Date.now());
+    const timer = window.setTimeout(() => {
+      authRevisionRef.current++;
+      sessionRef.current = null;
+      activeUserRef.current = null;
+      setSession(null);
+      setConnectivityWarning(null);
+      setPasswordRecoveryActive(false);
+    }, Math.min(delay, 2147483647));
+    return () => window.clearTimeout(timer);
+  }, [session]);
+
+  const loadProfile = useCallback(async () => {
+    if (!userId) return;
+    const request = ++requestRef.current;
+    const current = () => activeUserRef.current === userId && requestRef.current === request;
+    setProfileState({ userId, result: null, loading: true });
+    const result = await ensureProfile(
+      () => fetchProfile(userId),
+      async () => {
+        const fullName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Пользователь';
+        return await supabase.from('profiles').insert({
+          id: userId, full_name: fullName,
+          public_slug: generateUniqueSlug(fullName, userId), onboarding_completed: false,
+        });
+      },
+      current,
+    );
+    if (current()) setProfileState({ userId, result, loading: false });
+  }, [userId, user?.user_metadata?.full_name, user?.email]);
+  useEffect(() => {
+    const requests = requestRef;
+    if (!userId) {
+      requestRef.current++;
+      setProfileState({ userId: null, result: null, loading: false });
       return;
     }
-
-    let cancelled = false;
-    setProfileLoading(true);
-    setProfileError(null);
-
-    (async () => {
-      const result = await fetchProfile(userId);
-      if (cancelled) return;
-
-      if (result.status === 'found') {
-        setProfile(result.profile);
-        setProfileLoading(false);
-        return;
-      }
-
-      if (result.status === 'error') {
-        setProfileError(result.message);
-        setProfileLoading(false);
-        return;
-      }
-
-      // A confirmed NOT_FOUND is the only state in which we bootstrap a
-      // profile row for an authenticated auth user.
-      const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Пользователь';
-      const slug = generateUniqueSlug(fullName, userId);
-      const { error: insertErr } = await supabase.from('profiles').insert({
-        id: userId,
-        full_name: fullName,
-        public_slug: slug,
-        onboarding_completed: false,
-      });
-
-      if (cancelled) return;
-
-      if (insertErr && insertErr.code !== '23505') {
-        setProfileError('Не удалось создать профиль. Обновите страницу или попробуйте позже.');
-        setProfileLoading(false);
-        return;
-      }
-
-      // A duplicate can happen when another tab created the row first.
-      const retry = await fetchProfile(userId);
-      if (cancelled) return;
-
-      if (retry.status === 'found') {
-        setProfile(retry.profile);
-        setProfileError(null);
-      } else if (retry.status === 'error') {
-        setProfileError(retry.message);
-      } else {
-        setProfileError('Профиль не найден после входа. Попробуйте обновить страницу.');
-      }
-      setProfileLoading(false);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, user]);
-
-  const refreshProfile = useCallback(async () => {
-    if (!userId) return;
-    setProfileLoading(true);
-    setProfileError(null);
-
-    const result = await fetchProfile(userId);
-    if (result.status === 'found') {
-      setProfile(result.profile);
-    } else if (result.status === 'error') {
-      setProfileError(result.message);
-    } else {
-      setProfile(null);
-      setProfileError('Профиль не найден.');
-    }
-    setProfileLoading(false);
-  }, [userId]);
+    void loadProfile();
+    return () => { requests.current++; };
+  }, [userId, loadProfile]);
+  const refreshProfile = loadProfile;
 
   const signUp = useCallback(async (fullName: string, email: string, password: string) => {
-    if (!isSupabaseConfigured) {
-      return { error: 'Supabase не настроен.', needsEmailConfirm: false };
-    }
-
+    if (!isSupabaseConfigured) return { error: 'Supabase не настроен.', outcome: 'ERROR' as const };
     const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
+      email, password, options: { data: { full_name: fullName } },
     });
-
-    if (error) {
-      return { error: translateAuthError(error.message), needsEmailConfirm: false };
-    }
-
-    // Supabase intentionally does not always reveal whether an email already
-    // exists. The UI therefore uses privacy-safe wording for this state.
-    return {
-      error: null,
-      needsEmailConfirm: !data.session && !!data.user,
-    };
+    const outcome = classifySignup(data, error);
+    return { outcome, error: outcome === 'ERROR' ? translateAuthError(error?.message || '') : null };
   }, []);
-
   const signIn = useCallback(async (email: string, password: string) => {
+    setAuthError(null);
     if (!isSupabaseConfigured) return { error: 'Supabase не настроен.' };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: translateAuthError(error.message) };
-    return { error: null };
+    return { error: liveSession(data.session) ? null : 'Не удалось подтвердить вход. Попробуйте ещё раз.' };
   }, []);
-
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setUser(null);
-    setProfile(null);
-    setProfileError(null);
-    setPasswordRecoveryActive(false);
+    authRevisionRef.current++;
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      // SDK sign-out succeeded; clear even if an event is delayed.
+      activeUserRef.current = null;
+      sessionRef.current = null;
+      authRevisionRef.current++;
+      setConnectivityWarning(null);
+      requestRef.current++;
+      setSession(null);
+      setPasswordRecoveryActive(false);
+      setProfileState({ userId: null, result: null, loading: false });
+    } catch {
+      setAuthError('Не удалось выйти. Проверьте соединение и повторите выход.');
+    }
   }, []);
-
   const resetPassword = useCallback(async (email: string) => {
     if (!isSupabaseConfigured) return { error: 'Supabase не настроен.' };
-    // The recovery fragment is consumed by Supabase first; routing switches
-    // to /reset-password only after PASSWORD_RECOVERY fires.
     const redirectTo = window.location.origin;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
-    if (error) return { error: translateAuthError(error.message) };
-    return { error: null };
+    return { error: error ? translateAuthError(error.message) : null };
   }, []);
-
   const updatePassword = useCallback(async (newPassword: string) => {
     if (!isSupabaseConfigured) return { error: 'Supabase не настроен.' };
     const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) return { error: translateAuthError(error.message) };
-    setPasswordRecoveryActive(false);
-    return { error: null };
+    if (!error) setPasswordRecoveryActive(false);
+    return { error: error ? translateAuthError(error.message) : null };
   }, []);
 
-  const isAuthenticated = Boolean(session?.user?.id && user?.id === session.user.id);
-
-  const value = useMemo<AuthContextValue>(
-    () => ({
-      user,
-      session,
-      profile,
-      authLoading,
-      profileLoading,
-      profileError,
-      supabaseReady: isSupabaseConfigured,
-      isAuthenticated,
-      passwordRecoveryActive,
-      signUp,
-      signIn,
-      signOut,
-      resetPassword,
-      updatePassword,
-      refreshProfile,
-    }),
-    [
-      user,
-      session,
-      profile,
-      authLoading,
-      profileLoading,
-      profileError,
-      isAuthenticated,
-      passwordRecoveryActive,
-      signUp,
-      signIn,
-      signOut,
-      resetPassword,
-      updatePassword,
-      refreshProfile,
-    ]
-  );
-
+  const result = profileState.userId === userId ? profileState.result : null;
+  const profile = result?.status === 'FOUND' ? result.profile : null;
+  const profileError = result?.status === 'ERROR' ? result.message : null;
+  const profileLoading = !!userId && (profileState.userId !== userId || profileState.loading);
+  const profileStatus = profileLoading ? 'LOADING' : result?.status ?? 'IDLE';
+  const isAuthenticated = !!liveSession(session);
+  const value = useMemo<AuthContextValue>(() => ({
+    user, session, profile, authLoading, profileLoading, profileStatus, profileError, authError, connectivityWarning, retryAuth,
+    supabaseReady: isSupabaseConfigured, isAuthenticated, passwordRecoveryActive,
+    signUp, signIn, signOut, resetPassword, updatePassword, refreshProfile,
+  }), [user, session, profile, authLoading, profileLoading, profileStatus, profileError, authError, connectivityWarning, retryAuth,
+    isAuthenticated, passwordRecoveryActive, signUp, signIn, signOut, resetPassword, updatePassword, refreshProfile]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
-async function fetchProfile(userId: string): Promise<ProfileFetchResult> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('fetchProfile error:', error.message);
-    return {
-      status: 'error',
-      message: 'Не удалось загрузить профиль. Сессия сохранена — попробуйте обновить страницу.',
-    };
+async function fetchProfile(userId: string): Promise<ProfileResult<Profile>> {
+  try {
+    const { data, error } = await supabase.from('profiles').select(PROFILE_FIELDS).eq('id', userId).maybeSingle();
+    return classifyProfile(data as Profile | null, error);
+  } catch (error) {
+    return classifyProfile<Profile>(null, error);
   }
-
-  if (!data) return { status: 'missing' };
-  return { status: 'found', profile: data as Profile };
 }
-
 function generateUniqueSlug(name: string, id: string): string {
   const base = transliterate(name);
   const suffix = id.replace(/-/g, '').slice(0, 6);
@@ -334,7 +269,6 @@ function transliterate(name: string): string {
     'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
     'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
   };
-
   return name
     .toLowerCase()
     .trim()
@@ -345,10 +279,9 @@ function transliterate(name: string): string {
 
 function translateAuthError(msg: string): string {
   if (msg.includes('Invalid login credentials')) return 'Неверный email или пароль.';
-  if (msg.includes('User already registered')) return 'Пользователь с таким email уже зарегистрирован.';
   if (msg.includes('Password should be at least')) return 'Пароль должен содержать минимум 6 символов.';
   if (msg.includes('Unable to validate email')) return 'Некорректный email.';
-  if (msg.includes('Email not confirmed')) return 'Сначала подтвердите email.';
+  if (msg.includes('Email not confirmed')) return 'Сначала подтвердите email. Мы отправляли вам письмо после регистрации.';
   if (msg.includes('For security purposes')) return 'Ссылка восстановления устарела. Запросите новую.';
   if (msg.includes('Token has expired or is invalid')) return 'Ссылка восстановления устарела. Запросите новую.';
   if (msg.includes('Password')) return 'Пароль слишком короткий — минимум 6 символов.';
