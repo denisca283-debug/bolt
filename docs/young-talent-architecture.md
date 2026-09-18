@@ -4,7 +4,7 @@ Stage B draft; stacked on corrected PR5 `b0e46cf2754b74a23d3e8a8f13c6fe1eda03630
 
 ## IMPLEMENTED
 
-Separate adult auth identity and casting subject. Minor has no account. Approved, expiring guardian authority; independent review RPC; protected discovery permission; contact resolves to canonical guardian DM. Project-specific consent gates applications. Private review records bind minor opportunities to an exact content hash; editing invalidates approval without bypassing organization ownership. Tests exercise privacy, self-approval, blocked upload and borrowed consent.
+Separate adult auth identity and casting subject. Minor has no account. Approved, expiring guardian authority; independent review RPC; protected discovery permission; discovery is separate from contextual invitation authority. The old context-free DM endpoint is revoked. Pending creators can edit only private drafts; they cannot publish, grant consent or expose media. Contextual invitations require manage_candidates plus reviewed search, a role and a reviewed minor opportunity in the same project. The guardian explicitly accepts project-specific consent before a search/invitation child can become an active candidate. No DM is created automatically. Project-specific consent gates applications. Private review records bind minor opportunities to an exact content hash; editing invalidates approval without bypassing organization ownership. Tests exercise privacy, self-approval, blocked upload and borrowed consent.
 
 ## FOUNDATION ONLY
 
@@ -16,7 +16,7 @@ Guardian evidence intake, secondary guardian invitation/consent, audited operato
 
 ## RELEASE BLOCKER
 
-No minor public launch until evidence/age/representative review, responsible-adult acceptance, retention/deletion and GPS/EXIF sanitation exist. Client media upload remains denied. No production migration or permission granted.
+No minor public launch until evidence/age/representative review, responsible-adult evidence/operator review, retention/deletion and GPS/EXIF sanitation exist. Client media upload remains denied. No production migration or permission granted.
 
 ## Verification
 

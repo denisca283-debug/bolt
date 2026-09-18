@@ -20,15 +20,17 @@ test('production network: full replay, casting, guardians, graph, education and 
  const dir=new URL('../supabase/migrations/',import.meta.url);for(const f of (await readdir(dir)).filter(x=>x.endsWith('.sql')).sort()){if(process.env.FILMVERSE_SQL_TRACE)console.error(f);await db.exec(await readFile(new URL(f,dir),'utf8'));}
  for(const id of [a,b,c,d]){await q('INSERT INTO auth.users(id,email,email_confirmed_at) VALUES($1,$2,now())',[id,id+'@test.invalid']);await q("INSERT INTO profiles(id,full_name,public_slug,city) VALUES($1,$2,$3,'Москва')",[id,'Person '+id,'person-'+id]);}
 
- let minor,subject,guardian,org,project,role,candidate;
+ let minor,subject,guardian,org,project,role,candidate,minorWork;
  const grant=async(id,names)=>{await db.exec('RESET ROLE');await q('INSERT INTO user_permissions(user_id,permission_id) SELECT $1,id FROM permissions WHERE name=ANY($2) ON CONFLICT DO NOTHING',[id,names]);};
  await t.test('Young Talent is not an account; pending guardian cannot publish; neither guest nor PRO buys access',async()=>{
   await as(a);minor=await scalar("SELECT minor_create('Young performer','parent')");subject=await scalar('SELECT id FROM casting_subjects WHERE minor_talent_id=$1',[minor]);guardian=await scalar('SELECT id FROM minor_guardians WHERE minor_talent_id=$1',[minor]);
   assert.equal(await scalar('SELECT count(*)::int FROM profiles'),4);
-  assert.equal((await q('UPDATE minor_talent_profiles SET discoverable=true WHERE id=$1 RETURNING id',[minor])).length,0);
+  assert.equal((await q("UPDATE minor_talent_profiles SET bio='Private draft details' WHERE id=$1 RETURNING id",[minor])).length,1);
+  await denied('UPDATE minor_talent_profiles SET discoverable=true WHERE id=$1 RETURNING id',[minor]);
   await denied('SELECT created_by FROM minor_talent_profiles');
   await denied("UPDATE minor_guardians SET status='approved' WHERE id=$1",[guardian]);
   await denied('SELECT * FROM filmverse_private.minor_talent_private');
+  await denied("INSERT INTO minor_media(minor_talent_id,object_path,media_type,sanitized_at) VALUES($1,'fake-sanitized.jpg','image',now())",[minor]);
   await as(b);await denied('SELECT young_talent_search()');
   await as(null,'anon');await denied('SELECT id FROM minor_talent_profiles');await denied('SELECT young_talent_search()');
   await grant(a,['review_guardianship']);await as(a);await denied("SELECT guardianship_review($1,true,'Examined original authority',now()+interval '1 month')",[guardian]);
@@ -42,7 +44,12 @@ test('production network: full replay, casting, guardians, graph, education and 
  await t.test('canonical application keeps child subject separate; consent cannot be borrowed; opportunity requires independent review',async()=>{
   await grant(b,['publish_minor_opportunity','search_minor_talent']);
   await as(b);project=await scalar("INSERT INTO projects(title) VALUES('Network film') RETURNING id");
+  await denied("INSERT INTO work_opportunities(title,type,audience,project_id,minor_opportunity,minor_responsible_adult) VALUES('Unaccepted role','casting','actors',$1,true,$2)",[project,b]);
+  await db.exec('RESET ROLE');
+  await q("INSERT INTO minor_project_responsibilities(project_id,adult_user_id,policy_version,reviewed_by,valid_until) VALUES($1,$2,'v1',$3,now()+interval '1 month')",[project,b,d]);
+  await as(b);await q("SELECT minor_responsibility_accept($1,'v1')",[project]);
   const work=await scalar("INSERT INTO work_opportunities(title,type,audience,project_id,minor_opportunity,minor_responsible_adult) VALUES('Young role','casting','actors',$1,true,$2) RETURNING id",[project,b]);
+  minorWork=work;
   await as(a);await denied('INSERT INTO work_applications(work_id,casting_subject_id) VALUES($1,$2)',[work,subject]);
   await as(d);await q('SELECT minor_opportunity_review($1)',[work]);
   await as(a);await q("INSERT INTO minor_project_consents(casting_subject_id,project_id,scope,terms_version,expires_at) VALUES($1,$2,'application','v1',now()+interval '1 week')",[subject,project]);
@@ -69,6 +76,30 @@ test('production network: full replay, casting, guardians, graph, education and 
   await as(b);await q('SELECT casting_share_revoke($1)',[shared.id]);
   await as(null,'anon');assert.equal((await scalar('SELECT casting_share_read($1)',[shared.token])).length,0);
  });
+ await t.test('reviewed search is not contact authority; contextual guardian invitation precedes candidate activation',async()=>{
+  await as(d);await denied('SELECT minor_contact($1)',[subject]);await denied('SELECT minor_contact($1,$2,$3)',[subject,role,minorWork]);
+  await as(b);const inviteRole=await scalar("INSERT INTO casting_roles(project_id,title) VALUES($1,'Invitation role') RETURNING id",[project]);
+  const invitation=await scalar('SELECT minor_contact($1,$2,$3)',[subject,inviteRole,minorWork]);
+  assert.equal(await scalar('SELECT count(*)::int FROM role_candidates WHERE role_id=$1',[inviteRole]),0);
+  await denied("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[inviteRole,subject]);
+  await as(c);await denied("SELECT minor_invitation_respond($1,true,'invite-v2',now()+interval '1 week')",[invitation]);
+  await as(a);await q("SELECT minor_invitation_respond($1,true,'invite-v2',now()+interval '1 week')",[invitation]);
+  await as(b);await q("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[inviteRole,subject]);
+  await db.exec('RESET ROLE');await q("INSERT INTO project_members(project_id,user_id,status) VALUES($1,$2,'active')",[project,c]);
+  await as(c);await denied("INSERT INTO casting_roles(project_id,title) VALUES($1,'Unrelated member')",[project]);
+  await db.exec('RESET ROLE');await q("INSERT INTO project_casting_authorities(project_id,user_id,permission,granted_by) VALUES($1,$2,'manage_candidates',$3)",[project,c,b]);
+  await as(c);assert.equal(await scalar("SELECT filmverse_private.project_casting_can($1,'manage_candidates')",[project]),true);
+  assert.equal(await scalar("SELECT filmverse_private.project_casting_can($1,'approve_cast')",[project]),false);
+  const visibleCandidate=await scalar('SELECT id FROM role_candidates WHERE casting_subject_id=(SELECT id FROM casting_subjects WHERE adult_user_id=$1)',[c]);
+  await denied("UPDATE role_candidates SET status='approved' WHERE id=$1",[visibleCandidate]);
+  await denied("SELECT casting_share_create($1,$2,now()+interval '1 day')",[project,[candidate]]);
+  await denied('SELECT minor_contact($1,$2,$3)',[subject,role,minorWork]);
+ });
+ await t.test('unrelated responsible adult cannot accept even a reviewed row; browser cannot manufacture review',async()=>{
+  await db.exec('RESET ROLE');await q("INSERT INTO minor_project_responsibilities(project_id,adult_user_id,policy_version,reviewed_by,valid_until) VALUES($1,$2,'v1',$3,now()+interval '1 month')",[project,d,b]);
+  await as(d);await denied("SELECT minor_responsibility_accept($1,'v1')",[project]);
+  await denied('UPDATE minor_project_responsibilities SET accepted_at=now() WHERE project_id=$1',[project]);
+ });
  let relation;
  await t.test('graph is bilateral, nonexclusive, private until individual opts in; ended relation disappears',async()=>{
   await as(b);org=await scalar("SELECT organization_create('Cinema school','network-school','education')");
@@ -78,6 +109,28 @@ test('production network: full replay, casting, guardians, graph, education and 
   await as(c);await q("SELECT relationship_respond($1,'confirm',true,true)",[relation]);
   await denied("UPDATE organization_professional_relationships SET status='active'");
   await as(null,'anon');const graph=await scalar('SELECT professional_graph($1,NULL)',[org]);assert.equal(graph.length,1);assert.equal(graph[0].full_name,'Person '+c);assert.equal('email' in graph[0],false);
+ });
+ await t.test('private graph operates without public discoverability; company and person independently control display',async()=>{
+  await as(a);await q("INSERT INTO profile_privacy_settings(user_id,profile_visibility) VALUES($1,'private') ON CONFLICT(user_id) DO UPDATE SET profile_visibility='private'",[a]);
+  await as(b);const privateRelation=await scalar("SELECT relationship_request($1,$2,'regular_freelancer','Private collaborator')",[org,a]);
+  await as(a);await q("SELECT relationship_respond($1,'confirm',true,true)",[privateRelation]);
+  await as(null,'anon');assert.equal((await scalar('SELECT professional_graph($1,NULL)',[org])).length,1);
+  await as(c);await q("SELECT relationship_respond($1,'confirm',false,true)",[relation]);
+  await as(null,'anon');assert.equal((await scalar('SELECT professional_graph($1,NULL)',[org])).length,0);
+  assert.equal((await scalar('SELECT professional_graph(NULL,$1)',[c])).length,1);
+  await as(b);await q("SELECT relationship_respond($1,'confirm',false,false)",[relation]);
+  await as(c);await q("SELECT relationship_respond($1,'confirm',true,true)",[relation]);
+  await as(null,'anon');assert.equal((await scalar('SELECT professional_graph($1,NULL)',[org])).length,0);
+  await as(b);await q("SELECT relationship_respond($1,'confirm',true,false)",[relation]);
+ });
+ await t.test('authorized private company relationship stays operational and absent from public graph',async()=>{
+  await as(b);const privateOrg=await scalar("SELECT organization_create('Private studio','private-graph-studio','education')");
+  await q("UPDATE organizations SET visibility='members_only' WHERE id=$1",[privateOrg]);
+  const privateRelation=await scalar("SELECT relationship_request($1,$2,'preferred_crew','Private team')",[privateOrg,c]);
+  await q("SELECT relationship_respond($1,'confirm',true,false)",[privateRelation]);
+  await as(c);await q("SELECT relationship_respond($1,'confirm',true,true)",[privateRelation]);
+  assert.equal(await scalar('SELECT status FROM organization_professional_relationships WHERE id=$1',[privateRelation]),'active');
+  await as(null,'anon');assert.deepEqual(await scalar('SELECT professional_graph($1,NULL)',[privateOrg]),[]);
  });
  await t.test('education/events public discovery excludes drafts; unrelated editor denied; organization type enforced',async()=>{
   await as(b);const program=await scalar("INSERT INTO education_programs(organization_id,title,program_type,format,price_type) VALUES($1,'Directing course','course','online','free') RETURNING id",[org]);
@@ -111,6 +164,13 @@ test('production network: full replay, casting, guardians, graph, education and 
   await assert.rejects(q("SELECT filmverse_private.referral_qualify($1,'first_application','verified-application')",[attr]),e=>e.code==='23514');
   await as(a);const dash=await scalar('SELECT referral_dashboard($1)',[partner]);assert.equal(dash.signups,1);assert.equal(await scalar('SELECT student_badge($1)',[c]),false);assert.equal('new_user_id' in dash,false);
   await as(d);await denied('SELECT referral_dashboard($1)',[partner]);
+ });
+ await t.test('typed referral routes cannot encode external redirects or arbitrary payloads',async()=>{
+  await db.exec('RESET ROLE');
+  assert.equal(await scalar("SELECT filmverse_private.referral_destination('work',$1,'{}')",[project]),'/work/'+project);
+  assert.equal(await scalar("SELECT filmverse_private.referral_destination('other_supported_internal',NULL,'{\"page\":\"https://evil.test\"}')"),null);
+  await assert.rejects(q("SELECT filmverse_private.referral_destination('work',NULL,'{\"redirect\":\"//evil.test\"}')"),e=>e.code==='22023');
+  await assert.rejects(q("SELECT filmverse_private.referral_destination('other_supported_internal',NULL,'{\"page\":\"students\",\"url\":\"//evil.test\"}')"),e=>e.code==='22023');
  });
  await t.test('every new relation has RLS and all definers fix search_path',async()=>{
   await db.exec('RESET ROLE');assert.equal(await scalar("SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity"),0);

@@ -50,10 +50,11 @@ test('Young Talent rejects unreviewed account and does not index protected disco
  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content','noindex,nofollow');
  await expect(page.getByRole('button',{name:'Связаться с представителем'})).toHaveCount(0);
 });
-test('Young Talent contact goes to guardian canonical room; no direct child account',async({page})=>{
+test('Young Talent requires reviewed context and saves invitation, never opens arbitrary guardian DM',async({page})=>{
  await setup(page,{signedIn:true});await page.route('**/rest/v1/rpc/young_talent_search',r=>r.fulfill({json:[{id:'child',casting_subject_id:'subject',display_name:'Young performer',city:'Москва'}]}));
  let contact;await page.route('**/rest/v1/rpc/minor_contact',r=>{contact=r.request().postDataJSON();return r.fulfill({json:'guardian-room'});});
- await page.goto('/#/young-talent');await page.getByRole('button',{name:'Связаться с представителем'}).click();await expect(page).toHaveURL(/#\/messages\/guardian-room$/);expect(contact).toEqual({p_subject:'subject'});
+ await page.route('**/rest/v1/rpc/minor_contact_contexts',r=>r.fulfill({json:[{role_id:'role',work_id:'work',role_title:'Lead',work_title:'Reviewed film'}]}));
+ await page.goto('/#/young-talent');await expect(page.getByRole('button',{name:'Пригласить через представителя'})).toBeDisabled();await page.getByLabel('Контекст приглашения').selectOption('role:work');await page.getByRole('button',{name:'Пригласить через представителя'}).click();await expect(page.getByText('Приглашение сохранено. Кандидат будет доступен после согласия представителя.')).toBeVisible();await expect(page).toHaveURL(/#\/young-talent$/);expect(contact).toEqual({p_subject:'subject',p_role:'role',p_work:'work'});
 });
 test('Education requires school context, and failed event save never claims success',async({page})=>{
  await setup(page,{signedIn:true});await page.goto('/#/education');await page.getByRole('button',{name:'Добавить программу'}).click();await expect(page.getByText(/Для программы выберите киношколу/)).toBeVisible();

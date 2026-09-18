@@ -16,7 +16,7 @@ Candidate full cards, audition scheduling/guardian request delivery, media pipel
 
 ## RELEASE BLOCKER
 
-No production casting-media ingress. Minor candidates cannot be externally shared. Project owner/manage_projects is current casting authority; finer manage_casting delegation needs explicit reviewed policy.
+No production casting-media ingress. Minor candidates cannot be externally shared. Granular project_casting_authorities now separates view_casting, manage_candidates, manage_auditions, approve_cast and share_casting. Personal project owner or active organization owner is authorized; delegated permissions require current active project membership. Broad manage_projects and unrelated collaboration are not casting authority. Trusted administration alone writes delegation audit records; delegated-user UI and permission administration remain release work. Minor application-source needs application consent; search/invitation additionally needs an accepted role-specific invitation.
 
 ## Verification
 
