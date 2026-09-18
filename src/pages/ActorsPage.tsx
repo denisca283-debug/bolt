@@ -1,38 +1,120 @@
-import { useState, useMemo } from 'react';
-import { SlidersHorizontal, X } from 'lucide-react';
-import { actors, type ActorCategory } from '../data/mock';
+import { useState, useMemo, useEffect } from 'react';
+import { SlidersHorizontal, X, Loader2, UserPlus } from 'lucide-react';
 import { ActorCard } from '../components/ActorCard';
+import { supabase } from '../lib/supabase';
+import { useRouter } from '../router';
+import { useAuth } from '../hooks/useAuth';
+import { useAuthModal } from '../components/AuthModal';
+import type { Actor, PersonCardData } from '../types';
 
-const cities = ['Все города', 'Москва', 'Санкт-Петербург', 'Казань', 'Екатеринбург', 'Новосибирск', 'Владивосток'];
-const categories: (ActorCategory | 'Все')[] = ['Все', 'Актёр', 'Актриса', 'Массовка', 'Студент', 'Модель'];
-const genders = ['Все', 'Мужчины', 'Женщины'];
-const statuses = ['Все', 'Профессиональный', 'Начинающий', 'Студент', 'Массовка'];
+const ALL = 'Все';
+const ALL_CITIES = 'Все города';
+
+const categories = [ALL, 'Актёр', 'Актриса', 'Массовка', 'Студент', 'Модель'];
+const genders = [ALL, 'Мужчины', 'Женщины'];
+// Availability is FilmVerse's own angle: Backstage can't answer
+// "who is free in this city right now".
+const availabilities = [ALL, 'Свободен', 'Ограниченно', 'Занят'];
+
+type ActorWithSlug = Actor & { slug: string | null; avatarUrl: string | null };
 
 export function ActorsPage() {
-  const [city, setCity] = useState('Все города');
-  const [category, setCategory] = useState<(ActorCategory | 'Все')>('Все');
-  const [gender, setGender] = useState('Все');
-  const [status, setStatus] = useState('Все');
+  const { navigate } = useRouter();
+  const { isAuthenticated } = useAuth();
+  const { openRegister } = useAuthModal();
+
+  const [rows, setRows] = useState<ActorWithSlug[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [city, setCity] = useState(ALL_CITIES);
+  const [category, setCategory] = useState(ALL);
+  const [gender, setGender] = useState(ALL);
+  const [availability, setAvailability] = useState(ALL);
   const [showFilters, setShowFilters] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+
+      const { data: actorRows } = await supabase
+        .from('actors')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+
+      const actors = (actorRows || []) as Actor[];
+      const userIds = [...new Set(actors.map((a) => a.user_id).filter(Boolean))] as string[];
+
+      // `actors.user_id` points at profiles, but the public slug lives there —
+      // fetched separately so a card can link to the real profile page.
+      let slugById = new Map<string, { slug: string | null; avatarUrl: string | null }>();
+      if (userIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from('profiles')
+          .select('id, public_slug, avatar_url')
+          .in('id', userIds);
+        if (cancelled) return;
+        slugById = new Map(
+          ((profileRows || []) as { id: string; public_slug: string | null; avatar_url: string | null }[])
+            .map((p) => [p.id, { slug: p.public_slug, avatarUrl: p.avatar_url }])
+        );
+      }
+
+      setRows(
+        actors.map((a) => ({
+          ...a,
+          slug: a.user_id ? slugById.get(a.user_id)?.slug ?? null : null,
+          avatarUrl: a.user_id ? slugById.get(a.user_id)?.avatarUrl ?? null : null,
+        }))
+      );
+      setLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Offer only cities that actually have someone in them.
+  const cities = useMemo(() => {
+    const found = [...new Set(rows.map((r) => r.city).filter(Boolean))] as string[];
+    return [ALL_CITIES, ...found.sort((a, b) => a.localeCompare(b, 'ru'))];
+  }, [rows]);
+
   const filtered = useMemo(() => {
-    return actors.filter((a) => {
-      if (city !== 'Все города' && a.city !== city) return false;
-      if (category !== 'Все' && a.category !== category) return false;
+    return rows.filter((a) => {
+      if (city !== ALL_CITIES && a.city !== city) return false;
+      if (category !== ALL && a.category !== category) return false;
       if (gender === 'Мужчины' && a.gender !== 'М') return false;
       if (gender === 'Женщины' && a.gender !== 'Ж') return false;
-      if (status !== 'Все' && a.status !== status) return false;
+      if (availability !== ALL && a.availability !== availability) return false;
       return true;
     });
-  }, [city, category, gender, status]);
+  }, [rows, city, category, gender, availability]);
 
-  const activeFilterCount = [city !== 'Все города', category !== 'Все', gender !== 'Все', status !== 'Все'].filter(Boolean).length;
+  const cards: PersonCardData[] = filtered.map((a) => ({
+    id: a.id,
+    slug: a.slug,
+    name: a.full_name,
+    subtitle: a.category,
+    city: a.city,
+    photo: a.photo_url || a.gallery?.[0] || a.avatarUrl,
+    availability: a.availability,
+  }));
+
+  const activeFilterCount = [
+    city !== ALL_CITIES,
+    category !== ALL,
+    gender !== ALL,
+    availability !== ALL,
+  ].filter(Boolean).length;
 
   const resetFilters = () => {
-    setCity('Все города');
-    setCategory('Все');
-    setGender('Все');
-    setStatus('Все');
+    setCity(ALL_CITIES);
+    setCategory(ALL);
+    setGender(ALL);
+    setAvailability(ALL);
   };
 
   const FilterSection = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -55,6 +137,42 @@ export function ActorsPage() {
     </button>
   );
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 text-emerald-500 animate-spin" />
+      </div>
+    );
+  }
+
+  // Nobody has filled in an actor profile yet. Say so plainly rather than
+  // padding the page with invented people.
+  if (rows.length === 0) {
+    return (
+      <div className="animate-fade-in">
+        <div className="mb-6">
+          <h1 className="font-display text-3xl sm:text-4xl font-semibold text-ink-900 tracking-tight">
+            Актёры
+          </h1>
+        </div>
+        <div className="surface p-10 text-center">
+          <p className="text-ink-900 text-lg font-medium">Здесь пока никого нет</p>
+          <p className="text-ink-500 text-sm mt-2 max-w-md mx-auto leading-relaxed">
+            FilmVerse только открылся. Заполните анкету актёра — и вас увидят первым,
+            когда сюда придут кастинг-директора.
+          </p>
+          <button
+            onClick={() => (isAuthenticated ? navigate('/profile') : openRegister())}
+            className="mt-5 btn-primary"
+          >
+            <UserPlus className="h-4 w-4" />
+            {isAuthenticated ? 'Заполнить анкету актёра' : 'Создать анкету'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fade-in">
       {/* Header */}
@@ -63,7 +181,7 @@ export function ActorsPage() {
           Актёры
         </h1>
         <p className="mt-2 text-base text-ink-500">
-          {filtered.length} человек · Профессионалы, студенты и массовка
+          {filtered.length} {filtered.length === 1 ? 'человек' : 'человек'} · Профессионалы, студенты и массовка
         </p>
       </div>
 
@@ -102,6 +220,13 @@ export function ActorsPage() {
               </FilterChip>
             ))}
           </FilterSection>
+          <FilterSection title="Доступность">
+            {availabilities.map((a) => (
+              <FilterChip key={a} active={availability === a} onClick={() => setAvailability(a)}>
+                {a}
+              </FilterChip>
+            ))}
+          </FilterSection>
           <FilterSection title="Город">
             {cities.map((c) => (
               <FilterChip key={c} active={city === c} onClick={() => setCity(c)}>
@@ -116,21 +241,14 @@ export function ActorsPage() {
               </FilterChip>
             ))}
           </FilterSection>
-          <FilterSection title="Опыт">
-            {statuses.map((s) => (
-              <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>
-                {s}
-              </FilterChip>
-            ))}
-          </FilterSection>
         </div>
       )}
 
       {/* Actor grid */}
-      {filtered.length > 0 ? (
+      {cards.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 lg:gap-5">
-          {filtered.map((actor) => (
-            <ActorCard key={actor.id} actor={actor} />
+          {cards.map((person) => (
+            <ActorCard key={person.id} person={person} />
           ))}
         </div>
       ) : (

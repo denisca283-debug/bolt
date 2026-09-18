@@ -51,6 +51,18 @@ export type Skill = {
 // table alone — `profiles` stays the single place they are edited.
 export type ActorCategory = 'Актёр' | 'Актриса' | 'Массовка' | 'Студент' | 'Модель';
 
+// Normalised shape every people-grid card renders, whoever it came from —
+// an `actors` row, a specialist's profile, or (still) the demo data.
+export type PersonCardData = {
+  id: string;
+  slug: string | null;
+  name: string;
+  subtitle: string | null;
+  city: string | null;
+  photo: string | null;
+  availability: string | null;
+};
+
 export type Actor = {
   id: string;
   user_id: string | null;

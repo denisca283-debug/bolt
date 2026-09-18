@@ -58,6 +58,7 @@ const AVAILABILITY_LABELS: Record<string, string> = {
 
 const EMPTY_ACTOR_FIELDS: ActorFieldsValue = {
   category: '',
+  gender: '',
   age: '',
   height: '',
   hairColor: '',
@@ -70,6 +71,7 @@ function actorRowToFields(row: Actor | null): ActorFieldsValue {
   if (!row) return EMPTY_ACTOR_FIELDS;
   return {
     category: row.category || '',
+    gender: row.gender || '',
     age: row.age == null ? '' : String(row.age),
     height: row.height == null ? '' : String(row.height),
     hairColor: row.hair_color || '',
@@ -483,6 +485,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
           photo_url: editAvatarUrl,
           availability: AVAILABILITY_LABELS[editAvailability] || 'Свободен',
           category: editActor.category || null,
+          gender: editActor.gender || null,
           age: toIntOrNull(editActor.age),
           height: toIntOrNull(editActor.height),
           hair_color: editActor.hairColor.trim() || null,

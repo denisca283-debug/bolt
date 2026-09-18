@@ -7,6 +7,7 @@ const EYE_COLORS = ['Голубые', 'Серые', 'Зелёные', 'Кари�
 
 export type ActorFieldsValue = {
   category: string;
+  gender: string;
   age: string;
   height: string;
   hairColor: string;
@@ -14,6 +15,12 @@ export type ActorFieldsValue = {
   experienceYears: string;
   gallery: string[];
 };
+
+// Stored as 'М' / 'Ж' to match how casting filters read the field.
+const GENDERS: { value: string; label: string }[] = [
+  { value: 'М', label: 'Мужской' },
+  { value: 'Ж', label: 'Женский' },
+];
 
 type ActorFieldsProps = {
   value: ActorFieldsValue;
@@ -47,6 +54,27 @@ export function ActorFields({ value, onChange, onUploadPhoto, uploading }: Actor
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+      </div>
+
+      {/* Gender */}
+      <div>
+        <label className="block text-xs font-medium text-txt-secondary mb-1.5">Пол</label>
+        <div className="flex gap-2">
+          {GENDERS.map((g) => (
+            <button
+              key={g.value}
+              type="button"
+              onClick={() => onChange({ gender: value.gender === g.value ? '' : g.value })}
+              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                value.gender === g.value
+                  ? 'bg-emerald-200/30 text-emerald-600 border-emerald-400'
+                  : 'bg-surface-600 text-txt-secondary border-line-soft hover:border-line'
+              }`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Age + height */}

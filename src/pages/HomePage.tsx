@@ -116,8 +116,21 @@ export function HomePage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4">
+          {/* Still the demo set — the home page is the next page to move onto
+              real data, after the Actors and Specialists listings. */}
           {featuredActors.map((actor) => (
-            <ActorCard key={actor.id} actor={actor} />
+            <ActorCard
+              key={actor.id}
+              person={{
+                id: actor.id,
+                slug: null,
+                name: actor.name,
+                subtitle: actor.category,
+                city: actor.city,
+                photo: actor.photo,
+                availability: actor.availability,
+              }}
+            />
           ))}
         </div>
       </section>
