@@ -1,5 +1,6 @@
+import { ModalShell } from './ModalShell';
 import { useState, useEffect, useRef, createContext, useContext, useCallback, useMemo, type ReactNode } from 'react';
-import { X, Mail, Lock, User, Loader2, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRouter } from '../router';
 
@@ -39,7 +40,6 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   const [signupNotice, setSignupNotice] = useState(false);
   const attemptRef = useRef(0);
   const submittingRef = useRef(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Close modal via useEffect when auth state flips to authenticated
   useEffect(() => {
@@ -100,40 +100,6 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
     setLoading(false);
     setPassword('');
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const dialog = dialogRef.current;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]'
-    ) || []).filter((element) => element.getClientRects().length > 0);
-    (dialog?.querySelector<HTMLElement>('input') || focusable()[0] || dialog)?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        closeAuth();
-      }
-      if (event.key === 'Tab') {
-        const elements = focusable();
-        const first = elements[0];
-        const last = elements[elements.length - 1];
-        if (!first) { event.preventDefault(); dialog?.focus(); return; }
-        if (!dialog?.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
-          event.preventDefault();
-          (event.shiftKey ? last : first).focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault(); first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, [open, closeAuth]);
 
   const switchMode = (m: AuthMode) => {
     attemptRef.current++;
@@ -215,17 +181,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
     <AuthModalContext.Provider value={modalValue}>
       {children}
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fade-in">
-          <div className="absolute inset-0 bg-base-950/70 backdrop-blur-sm" onClick={closeAuth} />
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title || 'Вход в FilmVerse'} tabIndex={-1} className="relative w-full max-w-sm surface p-6 animate-scale-in">
-            <button
-              onClick={closeAuth}
-              className="absolute top-3 right-3 text-txt-muted hover:text-txt-primary transition-colors"
-              aria-label="Закрыть"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
+        <ModalShell title={title || 'Вход в FilmVerse'} onClose={closeAuth} width="max-w-sm">
             {signupNotice ? (
               <div className="text-center py-4">
                 <div className="flex justify-center mb-4">
@@ -250,11 +206,6 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
               </div>
             ) : (
               <>
-                {title && (
-                  <h2 className="font-display text-xl font-semibold text-txt-primary text-center mb-2">
-                    {title}
-                  </h2>
-                )}
 
                 {guestMessage && (
                   <div className="mb-4 p-3 rounded-lg bg-emerald-200/20 border border-emerald-400/30 flex items-start gap-2">
@@ -380,8 +331,7 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </ModalShell>
       )}
     </AuthModalContext.Provider>
   );

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Plus, X, Briefcase, FileText } from 'lucide-react';
+import { ModalShell } from '../ModalShell';
+import { useState } from 'react';
+import { Plus, Briefcase, FileText } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useAuthModal } from '../AuthModal';
 import { useRouter } from '../../router';
@@ -22,15 +23,6 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
   const { navigate } = useRouter();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [creating, setCreating] = useState<CreateKind | null>(null);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPickerOpen(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [pickerOpen]);
 
   const handleTrigger = () => {
     if (!user) {
@@ -65,33 +57,8 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
       </button>
 
       {pickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
-          <div
-            className="absolute inset-0 bg-base-950/70 backdrop-blur-sm"
-            onClick={() => setPickerOpen(false)}
-            aria-hidden
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="publish-picker-title"
-            className="relative w-full max-w-sm surface p-6 animate-scale-in"
-          >
-            <button
-              type="button"
-              onClick={() => setPickerOpen(false)}
-              className="absolute top-3 right-3 text-txt-muted hover:text-txt-primary transition-colors"
-              aria-label="Закрыть"
-            >
-              <X className="h-5 w-5" />
-            </button>
+        <ModalShell title="Что вы хотите разместить?" onClose={() => setPickerOpen(false)} width="max-w-sm">
 
-            <h2
-              id="publish-picker-title"
-              className="font-display text-xl font-semibold text-txt-primary pr-8"
-            >
-              Что вы хотите разместить?
-            </h2>
             <p className="mt-1.5 text-sm text-txt-secondary leading-relaxed">
               Выберите один из двух сценариев.
             </p>
@@ -137,8 +104,7 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
             >
               Отмена
             </button>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
       {creating && (

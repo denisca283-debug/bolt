@@ -11,9 +11,12 @@ const bundle = await build({
   entryPoints: ['src/components/AuthModal.tsx'], bundle: true, write: false, format: 'cjs',
   platform: 'node', jsx: 'automatic', external: ['react', 'react/jsx-runtime', 'lucide-react'],
   plugins: [{ name: 'fake-session-boundary', setup(build) {
+    build.onResolve({ filter: /\/ModalShell$/ }, () => ({ path: 'shell', namespace: 'fixture' }));
     build.onResolve({ filter: /hooks\/useAuth$/ }, () => ({ path: 'auth', namespace: 'fixture' }));
     build.onResolve({ filter: /\.\.\/router$/ }, () => ({ path: 'router', namespace: 'fixture' }));
-    build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'auth'
+    build.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path }) => ({ contents: path === 'shell'
+      ? 'import React from "react"; export const ModalShell = ({children}) => React.createElement("div", {role: "dialog"}, children);'
+      : path === 'auth'
       ? 'export const useAuth = () => globalThis.fixture.auth;'
       : 'export const useRouter = () => globalThis.fixture.router;' }));
   } }],

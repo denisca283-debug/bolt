@@ -1,5 +1,6 @@
+import { ModalShell } from '../ModalShell';
 import { useState, useEffect } from 'react';
-import { X, Loader2, ImagePlus, ShoppingBag, Briefcase, Clapperboard, Check } from 'lucide-react';
+import { Loader2, ImagePlus, ShoppingBag, Briefcase, Clapperboard, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import { addPulse } from '../../lib/pulse';
@@ -257,18 +258,8 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
-      <div className="absolute inset-0 bg-base-950/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-xl surface p-6 animate-scale-in max-h-[88vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-txt-muted hover:text-txt-primary transition-colors"
-          aria-label="Закрыть"
-        >
-          <X className="h-5 w-5" />
-        </button>
+    <ModalShell title="Разместить" onClose={onClose} width="max-w-xl">
 
-        <h2 className="font-display text-xl font-semibold text-txt-primary mb-1">Разместить</h2>
         <p className="text-xs text-txt-muted mb-5">Публикация видна всем — и тем, кто ещё не зарегистрирован.</p>
 
         {/* What to publish */}
@@ -526,7 +517,6 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
         <button onClick={handleSubmit} disabled={!canSubmit} className="btn-primary w-full mt-5">
           {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Публикуем…</> : <><Check className="h-4 w-4" /> Опубликовать</>}
         </button>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
