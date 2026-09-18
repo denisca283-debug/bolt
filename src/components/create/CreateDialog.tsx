@@ -11,6 +11,7 @@ export type CreateKind = 'listing' | 'work' | 'project';
 
 type CreateDialogProps = {
   initialKind?: CreateKind;
+  allowKindSwitch?: boolean;
   onClose: () => void;
   /** Called once the row exists, so the caller can refresh or navigate. */
   onCreated: (kind: CreateKind, id: string) => void;
@@ -55,7 +56,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: CreateDialogProps) {
+export function CreateDialog({ initialKind = 'listing', allowKindSwitch = true, onClose, onCreated }: CreateDialogProps) {
   const { user, profile } = useAuth();
   const [kind, setKind] = useState<CreateKind>(initialKind);
   const [saving, setSaving] = useState(false);
@@ -263,7 +264,7 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
         <p className="text-xs text-txt-muted mb-5">Публикация видна всем — и тем, кто ещё не зарегистрирован.</p>
 
         {/* What to publish */}
-        <div className="grid grid-cols-3 gap-2 mb-5">
+        {allowKindSwitch && <div className="grid grid-cols-3 gap-2 mb-5">
           {KINDS.map((k) => {
             const active = kind === k.kind;
             const Icon = k.icon;
@@ -286,6 +287,7 @@ export function CreateDialog({ initialKind = 'listing', onClose, onCreated }: Cr
           })}
         </div>
 
+        }
         <div className="space-y-4">
           <Field label={kind === 'listing' ? 'Что размещаете' : kind === 'work' ? 'Заголовок объявления' : 'Название проекта'}>
             <input

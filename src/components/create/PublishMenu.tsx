@@ -110,6 +110,7 @@ export function PublishMenu({ onCreated, compact = false }: PublishMenuProps) {
       {creating && (
         <CreateDialog
           initialKind={creating}
+          allowKindSwitch={false}
           onClose={() => setCreating(null)}
           onCreated={(kind, id) => {
             setCreating(null);
