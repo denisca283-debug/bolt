@@ -9,7 +9,7 @@ const [a,b,c,d] = ids;
 const bootstrap = `
  CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
  CREATE ROLE service_role NOLOGIN BYPASSRLS;
- CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY);
+ CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz);
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
  $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
  CREATE SCHEMA storage;
@@ -38,7 +38,7 @@ test('full migration replay and messaging convergence: A/B/C/D authorization', a
   const name = files.find(f=>f.endsWith('_messaging_schema_convergence.sql'));
   for (const file of files) await db.exec(await readFile(new URL(file,directory),'utf8'));
   for (const [i,id] of ids.entries()) {
-    await q('INSERT INTO auth.users VALUES($1)',[id]);
+    await q('INSERT INTO auth.users(id) VALUES($1)',[id]);
     await q('INSERT INTO profiles(id,full_name) VALUES($1,$2)',[id,['Alice','Bob','Carol','Dan'][i]]);
   }
   await as(a);
