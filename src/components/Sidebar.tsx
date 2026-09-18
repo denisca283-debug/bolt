@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Settings, Bell, LogOut, LogIn, UserPlus } from 'lucide-react';
 import { navItems } from './nav-config';
 import { useRouter } from '../router';
@@ -50,10 +51,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           const Icon = item.icon;
           if (item.requiresAuth && !isAuthenticated) return null;
           return (
+            <Fragment key={item.path}>
+            {item.path === '/actors' && <p className="px-3.5 pt-4 pb-2 text-xs text-txt-muted">Люди</p>}
+            {item.path === '/companies' && <p className="px-3.5 pt-4 pb-2 text-xs text-txt-muted">Компании, работа и проекты</p>}
             <button
               key={item.path}
               onClick={() => go(item.path)}
-              className={`nav-item ${active ? 'nav-item-active' : ''}`}
+              className={`nav-item ${item.path === '/student-projects' ? 'pl-7 text-sm' : ''} ${active ? 'nav-item-active' : ''}`}
             >
               <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
               <span className="flex-1 text-left">{item.label}</span>
@@ -63,6 +67,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </span>
               )}
             </button>
+            </Fragment>
           );
         })}
 

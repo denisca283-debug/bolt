@@ -41,7 +41,7 @@ export function SettingsPage() {
       {user && <PrivacySettings key={user.id} userId={user.id} />}
       {user && <ProfileContacts key={`contacts-${user.id}`} userId={user.id} editable />}
       {user && <ProfileMedia key={`media-${user.id}`} userId={user.id} editable />}
-      <div className="surface p-5 flex flex-wrap gap-3"><button className="btn-secondary" onClick={() => navigate('/resumes')}>Мои резюме</button><button className="btn-secondary" onClick={() => navigate('/organizations')}>Мои компании</button><button className="btn-secondary" onClick={() => navigate('/forgot-password')}>Сбросить пароль</button></div>
+      <div className="surface p-5 flex flex-wrap gap-3"><button className="btn-secondary" onClick={() => navigate('/model-settings')}>Модельная специализация</button><button className="btn-secondary" onClick={() => navigate('/students')}>Образование и поддержка студентов</button><button className="btn-secondary" onClick={() => navigate('/resumes')}>Мои резюме</button><button className="btn-secondary" onClick={() => navigate('/organizations')}>Мои компании</button><button className="btn-secondary" onClick={() => navigate('/forgot-password')}>Сбросить пароль</button></div>
       <VerificationPanel />
 
         {/* Account */}

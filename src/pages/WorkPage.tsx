@@ -8,12 +8,13 @@ import { useOrganization } from '../hooks/useOrganization';
 import { useCompanyCards } from '../hooks/useCompanyCards';
 import { useRouter } from '../router';
 import { ShareButton, Badge, Avatar } from '../components/ui';
-import { MessageButton } from '../components/MessageButton';
+import { WorkApplication } from '../components/WorkApplication';
+import { compensationLabels } from '../lib/modelTaxonomy';
 import { CreateDialog } from '../components/create/CreateDialog';
 import { useAuthModal } from '../components/AuthModal';
 import type { WorkOpportunity, Department, AuthorLite } from '../types';
 
-const AUDIENCES = ['Все', 'Актёрам', 'Специалистам'] as const;
+const AUDIENCES = ['Все', 'Актёрам', 'Моделям', 'Специалистам'] as const;
 
 function daysAgo(iso: string) {
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
@@ -95,8 +96,11 @@ export function WorkPage({ id }: { id?: string }) {
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((w) => {
-      if (audience === 'Актёрам' && w.audience !== 'Актёры') return false;
-      if (audience === 'Специалистам' && w.audience !== 'Специалисты') return false;
+      if (audience !== 'Все') {
+        const key = audience === 'Моделям' ? 'models' : audience === 'Актёрам' ? 'actors' : 'crew';
+        const targets = w.target_kinds || [w.audience === 'Актёры' ? 'actors' : w.audience === 'Модели' ? 'models' : 'crew'];
+        if (!targets.includes(key)) return false;
+      }
       if (deptId !== 'Все' && w.department_id !== deptId) return false;
       if (city !== 'Все' && w.city !== city) return false;
       if (q) {
@@ -164,6 +168,7 @@ export function WorkPage({ id }: { id?: string }) {
             ))}
           </div>
 
+          {selected.compensation_type && <div className="mt-4 space-y-2"><p className="font-semibold text-amber-400">{compensationLabels[selected.compensation_type]}</p><p>Расходы: {selected.expenses_covered}</p><p>Права использования: {selected.usage_rights}</p><p>Результат: {selected.deliverables}</p></div>}
           {selected.description && (
             <p className="mt-5 text-sm text-txt-secondary leading-relaxed whitespace-pre-line">
               {selected.description}
@@ -171,14 +176,7 @@ export function WorkPage({ id }: { id?: string }) {
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
-            {selectedAuthor && user?.id !== selected.user_id && (
-              <MessageButton
-                targetUserId={selectedAuthor.id}
-                targetName={selectedAuthor.name}
-                label="Откликнуться"
-                variant="primary"
-              />
-            )}
+            {user?.id !== selected.user_id && <WorkApplication workId={selected.id} />}
             {(selected.organization_id ? organization.can('publish_jobs', selected.organization_id) : user?.id === selected.user_id) && (
               <button onClick={() => removeOwn(selected.id)} className="btn-secondary">
                 <Trash2 className="h-4 w-4" /> Снять с публикации

@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { ActorFields, type ActorFieldsValue } from '../components/profile/ActorFields';
 import { SkillsPicker } from '../components/profile/SkillsPicker';
 import { AdditionalSkills } from '../components/profile/AdditionalSkills';
+import { StudentEducation } from '../components/StudentEducation';
 import { ProfileContacts } from '../components/profile/ProfileContacts';
 import { ProfileMedia } from '../components/profile/ProfileMedia';
 import { MessageButton } from '../components/MessageButton';
@@ -990,6 +991,7 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
 
       {/* Skills */}
       {displayProfile?.id && <AdditionalSkills userId={displayProfile.id} editable={isOwnProfile} />}
+      {displayProfile?.id && <StudentEducation userId={displayProfile.id} />}
       {displayProfile?.id && <ProfileContacts userId={displayProfile.id} />}
       {displayProfile?.id && <ProfileMedia userId={displayProfile.id} />}
       {selectedSkillNames.length > 0 && (
