@@ -635,4 +635,3 @@ export function ProfilePage({ slug }: { slug?: string } = {}) {
   );
 }
 
-с

@@ -330,4 +330,3 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
     </AuthModalContext.Provider>
   );
 }
-с
