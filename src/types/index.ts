@@ -10,8 +10,42 @@ export type Profile = {
   about: string | null;
   availability_status: 'available' | 'busy' | 'limited';
   onboarding_completed: boolean;
+  // Added by the chat migration; absent on databases that haven't run it yet.
+  plan?: 'free' | 'pro';
   created_at: string;
   updated_at: string;
+};
+
+// Chat rooms replace the old two-person `conversations` table: a room holds
+// any number of members and can be tied to a department.
+export type ChatRoomKind = 'direct' | 'group' | 'department';
+
+export type ChatRoom = {
+  id: string;
+  kind: ChatRoomKind;
+  title: string | null;
+  department_id: string | null;
+  created_by: string;
+  last_message_text: string | null;
+  last_message_at: string | null;
+  created_at: string;
+};
+
+export type ChatMember = {
+  id: string;
+  room_id: string;
+  user_id: string;
+  role: string;
+  last_read_at: string | null;
+  joined_at: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  room_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
 };
 
 export type Department = {
