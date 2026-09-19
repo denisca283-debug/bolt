@@ -325,7 +325,7 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
 DECLARE o public.commercial_offers;
 BEGIN
  SELECT * INTO o FROM public.commercial_offers WHERE id=p_offer;
- IF NOT FOUND OR auth.uid() IS NULL OR NOT filmverse_private.provider_sourcing_can(o.provider_organization_id,'view_sourcing') THEN
+ IF NOT FOUND OR auth.uid() IS NULL OR NOT filmverse_private.org_can(o.provider_organization_id,'manage_organization') THEN
  RAISE EXCEPTION 'offer_management_authority_required' USING ERRCODE='42501';END IF;
  RETURN jsonb_build_object('id',o.id,'source',o.source,'source_reference',o.source_reference,'observed_at',o.observed_at);
 END $$;

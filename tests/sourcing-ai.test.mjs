@@ -169,6 +169,26 @@ test('sourcing and AI: chronological replay, sealed bids, fair revisions, wallet
   await as(d);assert.equal(await scalar('SELECT count(*)::int FROM commercial_offer_discover() WHERE provider_organization_id=$1',[org]),0);
   await as(null,'anon');await denied('SELECT * FROM commercial_offer_discover()');await denied('SELECT source_reference FROM commercial_offers');
  });
+ await t.test('raw commercial provenance requires current organization management, never view_sourcing alone',async()=>{
+  await as(b);const org=await scalar("SELECT organization_create('Managed offers','managed-offers','rental_house')");
+  const other=await scalar("SELECT organization_create('Other managed offers','other-managed-offers','rental_house')");
+  await db.exec('RESET ROLE');
+  await q("INSERT INTO organization_members(organization_id,user_id,role,active) VALUES($1,$2,'admin',true),($1,$3,'member',true),($1,$4,'member',true)",[org,a,c,d]);
+  await q("INSERT INTO organization_sourcing_authorities(organization_id,user_id,permission,granted_by) VALUES($1,$2,'view_sourcing',$3)",[org,c,b]);
+  await as(null,'service_role');
+  const create=provider=>scalar("INSERT INTO commercial_offers(provider_organization_id,offer_type,scope_category,eligibility,claim_status,valid_from,valid_until,geography,terms,status,source,source_reference,observed_at) VALUES($1,'student_discount','equipment','Public eligibility','possible',now()-interval '1 day',now()+interval '1 week','RU','Public terms','published','provider_quote','private:manager-only',now()) RETURNING id",[provider]);
+  const own=await create(org),foreign=await create(other);
+  assert.equal(await scalar('SELECT source_reference FROM commercial_offers WHERE id=$1',[own]),'private:manager-only');
+  for(const user of [c,d]){
+   await as(user);assert.equal(await scalar('SELECT count(*)::int FROM commercial_offer_discover() WHERE id=$1',[own]),1);
+   await denied('SELECT source_reference FROM commercial_offers WHERE id=$1',[own]);
+   await denied('SELECT commercial_offer_provenance($1)',[own]);await denied('SELECT * FROM filmverse_private.commercial_offer_eligibility');
+  }
+  await as(a);assert.equal((await scalar('SELECT commercial_offer_provenance($1)',[own])).source_reference,'private:manager-only');
+  await denied('SELECT commercial_offer_provenance($1)',[foreign]);await denied('SELECT * FROM filmverse_private.commercial_offer_eligibility');
+  await db.exec('RESET ROLE');await q('UPDATE organization_members SET active=false WHERE organization_id=$1 AND user_id=$2',[org,a]);
+  await as(a);await denied('SELECT commercial_offer_provenance($1)',[own]);
+ });
  await t.test('lowest-compliant award compares complete costs, not body-only equipment prices',async()=>{
   await as(a);const e=await scalar('SELECT sourcing_create($1,NULL,$2)',[project,rule]);const [p1,p2]=await inviteAndOpen(e);
   await as(b);const bodyOnlyCheaper=await scalar('SELECT sourcing_bid_submit($1,$2,NULL,$3,$4,$5)',[e,p1,crypto.randomUUID(),items(500),{...commercialTerms,delivery_cost_minor:1000}]);
