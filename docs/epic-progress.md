@@ -117,3 +117,13 @@ mutation was performed in this packet. The previous working directory is intact.
 Security advisor references:
 [privileged callable functions](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable)
 and [password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
+
+## Production Network packet — A / B / C architectural checkpoint
+
+This additive checkpoint supersedes older readiness statements above; it does not erase historical findings.
+Corrected PR5 is frozen at `b0e46cf2754b74a23d3e8a8f13c6fe1eda036305` (88 tests, 38 browser scenarios).
+Stage B draft PR6 is frozen at `62a57950b9641c126333524994be45ca76d04a44` (96 tests, 46 browser scenarios; remote CI success).
+Stage C is stacked on that exact B head (107 tests, 7 real PostgreSQL concurrency tests, final 50 desktop/mobile scenarios).
+No merge, production migration, production seed or permission change.
+See [55-point review](production-network-final-review.md), [Stage B checkpoint](production-network-review.md), and [Stage C checkpoint](sourcing-ai-review.md).
+Young Talent launch, live AI/provider/payment execution, full supplier UI and SSR SEO remain explicitly blocked; foundation gates are not launch approval.
