@@ -27,6 +27,8 @@ Withdrawal appends an immutable record, never deletes a revision. Lifecycle deri
 
 Commercial Offers are canonical commercial_offers, trusted-ingress only: provider, type, scope, eligibility, exact discount structure, currency, validity, geography, terms/status/provenance. Sponsored promotion is not a discount; possible is not confirmed. A bid reference requires confirmed current matching-provider/currency offer AND trusted participant-specific eligibility evidence. This does not automatically calculate savings or verify technical compliance.
 
+Final micro-correction: a database CHECK makes promotion equivalent to sponsored_promotion with both discount fields null; every non-promotion must be possible/confirmed. This applies to trusted service writes too. Discovery uses commercial_offer_discover, a bounded SECURITY INVOKER safe projection; draft/withdrawn/expired/future offers are excluded even for providers. Column grants deny source_reference and wildcard reads to ordinary sessions. Provider management obtains its own provenance only through commercial_offer_provenance with current granular authority; service workers keep full access. Private eligibility evidence is never a discovery result.
+
 Future financial obligations and optional fairness evidence use [digital-assets-blockchain-readiness.md](digital-assets-blockchain-readiness.md). PostgreSQL remains operational authority; no blockchain integration.
 
 ## FUTURE DEPENDENCY

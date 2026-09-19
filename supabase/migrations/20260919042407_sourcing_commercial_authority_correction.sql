@@ -57,7 +57,9 @@ CREATE TABLE public.commercial_offers(
  source_reference text NOT NULL CHECK(length(source_reference) BETWEEN 1 AND 500),observed_at timestamptz NOT NULL,
  CHECK(discount_basis_points IS NULL OR discount_amount_minor IS NULL),
  CHECK(discount_amount_minor IS NULL OR currency IS NOT NULL),
- CHECK((offer_type<>'promotion' AND claim_status<>'sponsored_promotion') OR (discount_basis_points IS NULL AND discount_amount_minor IS NULL))
+ CONSTRAINT commercial_offer_claim_semantics CHECK(
+ (offer_type='promotion' AND claim_status='sponsored_promotion' AND discount_basis_points IS NULL AND discount_amount_minor IS NULL)
+ OR (offer_type<>'promotion' AND claim_status IN ('possible','confirmed')))
 );
 CREATE INDEX commercial_offer_discovery ON public.commercial_offers(status,valid_until,provider_organization_id);
 -- Eligibility must be established by trusted domain evidence, never a browser assertion.
@@ -299,7 +301,38 @@ CREATE POLICY provider_sourcing_grant_read ON public.organization_sourcing_autho
 CREATE POLICY withdrawal_read ON public.sourcing_bid_withdrawals FOR SELECT TO authenticated USING(filmverse_private.sourcing_bid_read(bid_id));
 CREATE POLICY commercial_offer_read ON public.commercial_offers FOR SELECT TO authenticated USING(
  filmverse_private.provider_sourcing_can(provider_organization_id,'view_sourcing') OR
- (status='published' AND now() BETWEEN valid_from AND valid_until AND filmverse_private.org_discoverable(provider_organization_id)));
+ (status='published' AND valid_from<=now() AND now()<valid_until AND filmverse_private.org_discoverable(provider_organization_id)));
+-- RLS controls rows, not columns. Provenance is never part of generic discovery.
+REVOKE SELECT ON public.commercial_offers FROM authenticated;
+GRANT SELECT(id,provider_organization_id,offer_type,scope_category,eligibility,claim_status,discount_basis_points,
+ discount_amount_minor,currency,valid_from,valid_until,geography,terms,status,source) ON public.commercial_offers TO authenticated;
+CREATE FUNCTION public.commercial_offer_discover(p_limit int DEFAULT 50,p_offset int DEFAULT 0)
+RETURNS TABLE(id uuid,provider_organization_id uuid,offer_type text,scope_category text,eligibility text,claim_status text,
+ discount_basis_points int,discount_amount_minor bigint,currency text,valid_from timestamptz,valid_until timestamptz,
+ geography text,terms text,status text,source text)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path='' AS $$
+ SELECT o.id,o.provider_organization_id,o.offer_type,o.scope_category,o.eligibility,o.claim_status,o.discount_basis_points,
+ o.discount_amount_minor,o.currency,o.valid_from,o.valid_until,o.geography,o.terms,o.status,o.source
+ FROM public.commercial_offers o WHERE o.status='published' AND o.valid_from<=now() AND now()<o.valid_until
+ AND filmverse_private.org_discoverable(o.provider_organization_id)
+ ORDER BY o.valid_until,o.id LIMIT least(greatest(coalesce(p_limit,50),1),100) OFFSET least(greatest(coalesce(p_offset,0),0),10000)
+$$;
+REVOKE ALL ON FUNCTION public.commercial_offer_discover(int,int) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.commercial_offer_discover(int,int) TO authenticated;
+-- Provider management can retrieve its own provenance; identity/authority is server checked.
+CREATE FUNCTION filmverse_private.commercial_offer_provenance(p_offer uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+DECLARE o public.commercial_offers;
+BEGIN
+ SELECT * INTO o FROM public.commercial_offers WHERE id=p_offer;
+ IF NOT FOUND OR auth.uid() IS NULL OR NOT filmverse_private.provider_sourcing_can(o.provider_organization_id,'view_sourcing') THEN
+ RAISE EXCEPTION 'offer_management_authority_required' USING ERRCODE='42501';END IF;
+ RETURN jsonb_build_object('id',o.id,'source',o.source,'source_reference',o.source_reference,'observed_at',o.observed_at);
+END $$;
+CREATE FUNCTION public.commercial_offer_provenance(p_offer uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path='' AS $$ SELECT filmverse_private.commercial_offer_provenance(p_offer) $$;
+REVOKE ALL ON FUNCTION filmverse_private.commercial_offer_provenance(uuid),public.commercial_offer_provenance(uuid) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION filmverse_private.commercial_offer_provenance(uuid),public.commercial_offer_provenance(uuid) TO authenticated;
 DO $$ DECLARE f record;BEGIN
  FOR f IN SELECT p.oid::regprocedure sig,p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
  WHERE n.nspname IN ('public','filmverse_private') AND p.proname IN
