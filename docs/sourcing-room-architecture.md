@@ -14,8 +14,20 @@ Material description/deadline/ceiling changes increment version, publish a commo
 ## FOUNDATION ONLY
 
 Bid-professional proposed/confirmation_pending/confirmed/declined schema is service-managed. No supplier can forge confirmed consent; award rejects pending commitments.
-Rule notices are persisted/readable, not a claim of email/push delivery. Shared Q&A is buyer-published; private supplier question inbox is not shipped.
+Rule notices are persisted/readable, not a claim of email/push delivery. Participant Q&A now stores asked → published_to_all/private_provider_specific states (answered is reserved for a later review step). Buyer answers require manage_sourcing. Common-scope changes must publish to all, increment the event version and require acknowledgement/reopen. Supplier identity columns are not browser-readable; participant UI and delivery are not shipped.
 No public auction showcase or full sourcing workspace UI. Canonical RPCs and adversarial SQL tests are the implemented foundation.
+
+## Corrective commercial contract
+
+New migration 20260919042407_sourcing_commercial_authority_correction.sql leaves prior migrations unchanged. Buyer permissions: view_sourcing/manage_sourcing/invite_sourcing_participants/evaluate_bids/award_sourcing; provider: view_sourcing/prepare_bid/submit_bid. Only personal project owners or active company owners inherit authority; trusted explicit grants require current project/company membership. General employees and manage_organization do not implicitly gain bid submission.
+
+Bid payloads are immutable. The six-argument sourcing_bid_submit adds versioned bounded commercial_terms: validity, availability, delivery/pickup, tax inclusion/amount, security/deposit and insurance terms, prep/service, mandatory fees, summary, compliance/alternative specification and nullable discount reference. Integer item_subtotal_minor + mandatory_additional_costs_minor = comparable_total_minor. Included tax is not counted twice; excluded tax is added. Refundable security is disclosed, not represented as a purchase fee; all nonrefundable mandatory charges belong in mandatory costs. Unknown costs cannot claim comparison_complete. Historical five-argument bids remain readable but incomplete/unawardable; reverse bidding requires explicit complete compliant terms.
+
+Withdrawal appends an immutable record, never deletes a revision. Lifecycle derives active/withdrawn/superseded. Withdrawal and award lock the same event. Award requires current final revision, unexpired offer, disclosed complete costs and available/conditional supply; lowest_compliant_bid excludes alternatives. Alternative specifications describe requested/offered/deviation without automatic equivalence. Professional-resource consent remains sourcing_bid_professionals, not graph membership.
+
+Commercial Offers are canonical commercial_offers, trusted-ingress only: provider, type, scope, eligibility, exact discount structure, currency, validity, geography, terms/status/provenance. Sponsored promotion is not a discount; possible is not confirmed. A bid reference requires confirmed current matching-provider/currency offer AND trusted participant-specific eligibility evidence. This does not automatically calculate savings or verify technical compliance.
+
+Future financial obligations and optional fairness evidence use [digital-assets-blockchain-readiness.md](digital-assets-blockchain-readiness.md). PostgreSQL remains operational authority; no blockchain integration.
 
 ## FUTURE DEPENDENCY
 
