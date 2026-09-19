@@ -130,6 +130,45 @@ test('sourcing and AI: chronological replay, sealed bids, fair revisions, wallet
   await as(b);await q('SELECT sourcing_bid_submit($1,$2,NULL,$3,$4,$5)',[e,party,crypto.randomUUID(),items(500),{...commercialTerms,discount_reference:offer}]);
   await denied("UPDATE commercial_offers SET claim_status='sponsored_promotion' WHERE id=$1",[offer]);
  });
+ await t.test('commercial offer semantics reject invalid trusted-service combinations, not only browser writes',async()=>{
+  await as(b);const org=await scalar("SELECT organization_create('Offer invariant provider','offer-invariant-provider','rental_house')");
+  await as(null,'service_role');
+  const insert=(kind,claim,bps=null,amount=null)=>q("INSERT INTO commercial_offers(provider_organization_id,offer_type,scope_category,eligibility,claim_status,discount_basis_points,discount_amount_minor,currency,valid_from,valid_until,geography,terms,status,source,source_reference,observed_at) VALUES($1,$2,'equipment','Public eligibility',$3,$4,$5,'RUB',now()-interval '2 days',now()+interval '1 week','RU','Public terms','published','provider_quote','internal:quote:secret',now()) RETURNING id",[org,kind,claim,bps,amount]);
+  for(const combination of [
+   ['student_discount','sponsored_promotion'],['package_discount','sponsored_promotion'],
+   ['promotion','possible'],['promotion','confirmed'],['promotion','sponsored_promotion',null,100],['promotion','sponsored_promotion',1000],
+  ])await assert.rejects(insert(...combination),e=>e.code==='23514'&&e.constraint==='commercial_offer_claim_semantics');
+  for(const combination of [
+   ['promotion','sponsored_promotion'],['student_discount','possible',1000],
+   ['student_discount','confirmed',1000],['package_discount','confirmed',null,100],
+  ])assert.equal((await insert(...combination)).length,1);
+ });
+ await t.test('commercial discovery projects safe columns; provenance is management-only and eligibility remains private',async()=>{
+  await as(b);const org=await scalar("SELECT organization_create('Safe offer provider','safe-offer-provider','rental_house')");
+  await as(null,'service_role');
+  const create=()=>scalar("INSERT INTO commercial_offers(provider_organization_id,offer_type,scope_category,eligibility,claim_status,discount_basis_points,valid_from,valid_until,geography,terms,status,source,source_reference,observed_at) VALUES($1,'student_discount','equipment','Public student criteria','confirmed',1000,now()-interval '2 days',now()+interval '1 week','RU','Public terms','published','provider_quote','internal:private-document:42',now()) RETURNING id",[org]);
+  const published=await create();const hidden=[];
+  for(const status of ['draft','withdrawn','expired']){const id=await create();await q('UPDATE commercial_offers SET status=$1 WHERE id=$2',[status,id]);hidden.push(id);}
+  const expired=await create();await q("UPDATE commercial_offers SET valid_until=now()-interval '1 hour' WHERE id=$1",[expired]);hidden.push(expired);
+  const future=await create();await q("UPDATE commercial_offers SET valid_from=now()+interval '1 day' WHERE id=$1",[future]);hidden.push(future);
+  assert.equal(await scalar('SELECT source_reference FROM commercial_offers WHERE id=$1',[published]),'internal:private-document:42');
+  await as(d);const rows=await q('SELECT * FROM commercial_offer_discover() WHERE provider_organization_id=$1',[org]);
+  assert.equal(rows.length,1);assert.equal(rows[0].id,published);
+  assert.deepEqual(Object.keys(rows[0]).sort(),['id','provider_organization_id','offer_type','scope_category','eligibility','claim_status','discount_basis_points','discount_amount_minor','currency','valid_from','valid_until','geography','terms','status','source'].sort());
+  assert.equal(JSON.stringify(rows).includes('internal:'),false);
+  for(const id of hidden)assert.equal(await scalar('SELECT count(*)::int FROM commercial_offers WHERE id=$1',[id]),0);
+  await denied('SELECT * FROM commercial_offers');await denied('SELECT source_reference FROM commercial_offers');
+  await denied("SELECT id FROM commercial_offers WHERE source_reference LIKE 'internal:%'");
+  await denied('SELECT * FROM filmverse_private.commercial_offer_eligibility');
+  await denied('SELECT commercial_offer_provenance($1)',[published]);
+  await as(b);assert.equal((await scalar('SELECT commercial_offer_provenance($1)',[published])).source_reference,'internal:private-document:42');
+  assert.equal(await scalar('SELECT count(*)::int FROM commercial_offers WHERE provider_organization_id=$1',[org]),6);
+  assert.equal(await scalar('SELECT count(*)::int FROM commercial_offer_discover() WHERE provider_organization_id=$1',[org]),1);
+  await denied('SELECT source_reference FROM commercial_offers');await denied('SELECT * FROM filmverse_private.commercial_offer_eligibility');
+  await q("UPDATE organizations SET visibility='members_only' WHERE id=$1",[org]);
+  await as(d);assert.equal(await scalar('SELECT count(*)::int FROM commercial_offer_discover() WHERE provider_organization_id=$1',[org]),0);
+  await as(null,'anon');await denied('SELECT * FROM commercial_offer_discover()');await denied('SELECT source_reference FROM commercial_offers');
+ });
  await t.test('lowest-compliant award compares complete costs, not body-only equipment prices',async()=>{
   await as(a);const e=await scalar('SELECT sourcing_create($1,NULL,$2)',[project,rule]);const [p1,p2]=await inviteAndOpen(e);
   await as(b);const bodyOnlyCheaper=await scalar('SELECT sourcing_bid_submit($1,$2,NULL,$3,$4,$5)',[e,p1,crypto.randomUUID(),items(500),{...commercialTerms,delivery_cost_minor:1000}]);

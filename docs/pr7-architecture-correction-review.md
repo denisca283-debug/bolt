@@ -1,15 +1,29 @@
 # PR6 + PR7 architectural correction review
 
-PR5 remains frozen at `b0e46cf2754b74a23d3e8a8f13c6fe1eda036305`. No merges, live Supabase mutations or production SQL. All previous migrations remain unchanged.
+PR5 remains frozen at `b0e46cf2754b74a23d3e8a8f13c6fe1eda036305`. No merges, deployments, live Supabase mutations or production SQL. Only the two never-applied corrective migrations below are amended in the final micro-correction, as explicitly authorized; every earlier migration remains unchanged.
 
 ## Stack
 
-- Corrected PR6: `87bfb30070a23ef828b157370bccdfcf9060d386`, `epic/production-network-foundation`.
+- Corrected PR6: `5dc2fd4a345a9f1a9c606b182cf9361f371c3c18`, `epic/production-network-foundation`.
 - PR7: `epic/sourcing-ai-foundation`, rebased on that exact corrected PR6 head. Old PR7 history is preserved in backup/pr7-before-architecture-correction-20260919; final remote SHA is reported with the PR, rather than embedding its own commit hash here.
 - New PR6 migration: `20260919040959_production_network_authority_correction.sql`.
 - New PR7 migration: `20260919042407_sourcing_commercial_authority_correction.sql`.
 
-Migration execution order is chronological, not commit order: original PR7 migrations 031153/031615 precede the new PR6 correction 040959 and PR7 correction 042407. Full chronological replay is verified. If PR6 is later deployed separately first, the earlier pending PR7 migration timestamps require an explicitly reviewed staging/deployment plan; do not silently reorder files, rewrite history or run production push flags automatically.
+Migration execution order is chronological, not commit order: original PR7 migrations 031153/031615 precede the PR6 correction 040959 and PR7 correction 042407. Do NOT apply PR6 separately to any shared environment. Live Supabase precedes PR3–PR7; future staging must apply the complete pending stack in chronological filename order in ONE reviewed plan. No migration renaming or casual repair/include-all shortcuts.
+
+## Final foundation micro-correction
+
+- A: current-only partial uniqueness permits new relationship episodes after end/decline/expiry. Historical terminal rows cannot be updated/deleted; public graph remains current-active and bilateral.
+- B: invitations have a server-set maximum 30-day lifetime and retain the original project/opportunity content hash. Acceptance and candidate activation recheck open role, matching original context, guardian authority, reviewed opportunity/responsible adult, expiry and bounded/live consent. Expired rows remain history.
+- C: database CHECK enforces promotion = sponsored_promotion without monetary/percentage discount; other types allow only possible/confirmed. Tests include trusted service writes.
+- D: commercial_offer_discover returns explicit safe columns under session RLS, excluding unpublished/expired/future/private-provider offers. Raw provenance is removed from generic grants; authorized provider management uses a separate provenance RPC, and trusted workers retain access. Eligibility evidence stays private. offers.search maps only to the safe domain result.
+
+Exact files amended in this micro-correction (10):
+
+- PR6: docs/pr6-authority-correction-review.md; docs/professional-graph-architecture.md; docs/young-talent-architecture.md; supabase/migrations/20260919040959_production_network_authority_correction.sql; tests/production-network.test.mjs.
+- PR7: docs/filmverse-ai-agent-architecture.md; docs/sourcing-room-architecture.md; docs/pr7-architecture-correction-review.md; supabase/migrations/20260919042407_sourcing_commercial_authority_correction.sql; tests/sourcing-ai.test.mjs.
+
+Previous PR7 head b3dd22326167f9d613fc1a2ebc26f0168177bd0f is preserved at backup/pr7-before-final-micro-correction-20260919. Final remote HEADs and exact verification results are reported in the handoff; no deployment is authorized.
 
 ## Part A
 
@@ -47,7 +61,7 @@ See [digital assets readiness](digital-assets-blockchain-readiness.md) and `src/
 
 ## Verification
 
-Local npm ci/typecheck/lint/test/build passed: **122 tests**, including full chronological replay/adversarial RLS and pure architecture contracts. Focused suites passed again after final eligibility hardening. Real socket-only PostgreSQL concurrency suite: **8 tests**, including withdrawal/award race. Full desktop/mobile Playwright: **50/50 passed**. Final remote CI status is recorded in the handoff. CI now also runs the real PostgreSQL suite.
+Previous correction baseline: **122 tests**, socket-only PostgreSQL concurrency **8/8**, desktop/mobile Playwright **50/50**. Final micro-correction adds four adversarial test groups. All gates are re-run on the final stack; final totals and remote CI status are recorded in the handoff. CI also runs the real PostgreSQL suite.
 
 PGlite full replay is not a hosted Supabase acceptance test. Real PG concurrency replays the exact sourcing/AI/corrective migrations against explicit prerequisite fixtures; it is not full-stack PostgreSQL 14 replay. Existing earlier views require PostgreSQL 15+. Browser fixtures make no claims about production data or email delivery.
 
