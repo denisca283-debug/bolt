@@ -1,5 +1,7 @@
 # FilmVerse — архитектурный отчёт по 55 пунктам
 
+> Исторический checkpoint до correction review. Актуальные изменения PR6/PR7, границы безопасности, точный список файлов и ограничения: [pr7-architecture-correction-review.md](pr7-architecture-correction-review.md). PR5 остаётся frozen. Старые формулировки о guardian DM и публичности графа ниже заменены корректирующими контрактами; это не разрешение на merge/production SQL.
+
 ## Стек и границы
 
 - Stage A: `epic/models-students`, PR #5, зафиксированный head `b0e46cf2754b74a23d3e8a8f13c6fe1eda036305`.
