@@ -173,7 +173,7 @@ test('production network: full replay, casting, guardians, graph, education and 
    await as(b);await db.exec('RESET ROLE; BEGIN');
    try{
     await mutate();await as(b);
-    // RLS may hide a revoked-guardian candidate entirely; either way no mutation is permitted.
+    // Historical visibility never authorizes active progression after authority loss.
     await db.exec('SAVEPOINT pipeline');
     try{assert.equal((await q("UPDATE role_candidates SET status='audition' WHERE id=$1 RETURNING id",[id])).length,0);}
     catch(e){if(e.code!=='42501')throw e;await db.exec('ROLLBACK TO pipeline');}
@@ -185,6 +185,108 @@ test('production network: full replay, casting, guardians, graph, education and 
    }finally{await db.exec('ROLLBACK; RESET ROLE');}
   }
   await as(b);assert.equal((await q("UPDATE role_candidates SET project_tags=ARRAY['current consent'] WHERE id=$1 RETURNING id",[id])).length,1);
+ });
+ await t.test('all minor candidate sources revalidate active authority while retaining private history and safe closure',async sub=>{
+  const activeStatuses=['review','shortlist','audition','hold','approved','backup'];
+  for(const source of ['application','invitation','search']){
+   await as(b);let id=candidate;let r=role;
+   if(source!=='application'){
+    r=await scalar('INSERT INTO casting_roles(project_id,title) VALUES($1,$2) RETURNING id',[project,'Safety '+source]);
+    const invitation=await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);
+    await as(a);await q("SELECT minor_invitation_respond($1,true,$2,now()+interval '1 week')",[invitation,'safety-'+source]);
+    await as(b);id=await scalar('INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,$3) RETURNING id',[r,subject,source]);
+   }
+   await sub.test(source+': valid current authority permits the pipeline',async()=>{
+    for(const status of activeStatuses)assert.equal((await q('UPDATE role_candidates SET status=$2 WHERE id=$1 RETURNING id',[id,status])).length,1);
+    await q("UPDATE role_candidates SET status='review' WHERE id=$1",[id]);
+    await denied('UPDATE role_candidates SET minor_application_project_id=$2 WHERE id=$1',[id,project]);
+    await denied("UPDATE role_candidates SET source='search',application_id=NULL WHERE id=$1",[id]);
+    await denied('SELECT filmverse_private.minor_casting_consent_current($1,$2,$3)',[subject,project,a]);
+   });
+   const changes=[
+    ['guardian revokes project consent',async()=>{await as(a);await q('UPDATE minor_project_consents SET revoked_at=now() WHERE casting_subject_id=$1 AND project_id=$2',[subject,project]);}],
+    ['expired consent',async()=>q("UPDATE minor_project_consents SET granted_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE casting_subject_id=$1 AND project_id=$2",[subject,project])],
+    ['revoked guardian',async()=>{await as(d);await q("SELECT guardianship_review($1,false,'Authority is no longer valid',NULL)",[guardian]);}],
+    ['expired guardian',async()=>q("UPDATE minor_guardians SET reviewed_at=now()-interval '2 days',valid_until=now()-interval '1 day' WHERE id=$1",[guardian])],
+    ['removed opportunity review',async()=>q('DELETE FROM filmverse_private.minor_opportunity_reviews WHERE work_id=$1',[minorWork])],
+    ['changed opportunity even after independent re-review',async()=>{await q("UPDATE work_opportunities SET title='Different reviewed safety terms' WHERE id=$1",[minorWork]);await as(d);await q('SELECT minor_opportunity_review($1)',[minorWork]);}],
+    ['revoked responsible adult',async()=>q('UPDATE minor_project_responsibilities SET revoked_at=now() WHERE project_id=$1',[project])],
+    ['expired responsible adult',async()=>q("UPDATE minor_project_responsibilities SET reviewed_at=now()-interval '2 days',valid_until=now()-interval '1 day' WHERE project_id=$1",[project])],
+    ['closed role',async()=>q("UPDATE casting_roles SET status='closed' WHERE id=$1",[r])],
+    ['changed role project',async()=>{const other=await scalar("INSERT INTO projects(user_id,title) VALUES($1,'Unrelated safety context') RETURNING id",[b]);await q('UPDATE casting_roles SET project_id=$1 WHERE id=$2',[other,r]);}],
+   ];
+   // Capture the application ID in the casting context; the guardian has no candidate SELECT grant.
+   const applicationId=await scalar('SELECT application_id FROM role_candidates WHERE id=$1',[id]);
+   if(source==='application')changes.push(['withdrawn application',async()=>{await as(a);await q("UPDATE work_applications SET status='withdrawn' WHERE id=$1",[applicationId]);}]);
+   for(const [label,mutate] of changes)await sub.test(source+': '+label+' denies progression but allows status-only rejection',async()=>{
+    await db.exec('RESET ROLE; BEGIN');
+    try{
+     await mutate();await as(b);
+     const before=(await q('SELECT * FROM role_candidates WHERE id=$1',[id]))[0];assert.ok(before,'authorized historical candidate remains readable');
+     if(applicationId)assert.equal((await q('SELECT id FROM work_applications WHERE id=$1',[applicationId])).length,1);
+     for(const status of [...activeStatuses,'new']){
+      await db.exec('SAVEPOINT denied_progress');
+      await denied('UPDATE role_candidates SET status=$2 WHERE id=$1 RETURNING id',[id,status]);
+      await db.exec('ROLLBACK TO denied_progress');
+     }
+     await db.exec('SAVEPOINT denied_tags');
+     await denied("UPDATE role_candidates SET status='rejected',project_tags=ARRAY['not closure'] WHERE id=$1 RETURNING id",[id]);
+     await db.exec('ROLLBACK TO denied_tags');
+     await db.exec('RESET ROLE');const consents=await q('SELECT * FROM minor_project_consents WHERE casting_subject_id=$1 ORDER BY id',[subject]);
+     await as(b);assert.equal((await q("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[id])).length,1);
+     assert.deepEqual((await q('SELECT * FROM role_candidates WHERE id=$1',[id]))[0],{...before,status:'rejected'});
+     await db.exec('SAVEPOINT denied_reopen');await denied("UPDATE role_candidates SET status='review' WHERE id=$1 RETURNING id",[id]);await db.exec('ROLLBACK TO denied_reopen');
+     await db.exec('RESET ROLE');assert.deepEqual(await q('SELECT * FROM minor_project_consents WHERE casting_subject_id=$1 ORDER BY id',[subject]),consents,'rejection never fabricates or revives consent');
+     await as(d);assert.equal((await q('SELECT id FROM role_candidates WHERE id=$1',[id])).length,0,'search permission is not historical casting authority');
+     assert.equal((await q("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[id])).length,0);
+    }finally{await db.exec('ROLLBACK; RESET ROLE');}
+   });
+  }
+ });
+ await t.test('revoked minor history is available only to authorized casting context; guardian can still withdraw',async()=>{
+  await db.exec('RESET ROLE; BEGIN');
+  try{
+   await q("UPDATE minor_guardians SET status='revoked' WHERE id=$1",[guardian]);
+   await q("UPDATE project_casting_authorities SET revoked_at=now() WHERE project_id=$1 AND user_id=$2",[project,c]);
+   await q("INSERT INTO project_casting_authorities(project_id,user_id,permission,granted_by) VALUES($1,$2,'view_casting',$3)",[project,c,b]);
+   await as(c);const row=(await q('SELECT * FROM role_candidates WHERE id=$1',[candidate]))[0];assert.ok(row);
+   assert.equal((await q('SELECT id FROM work_applications WHERE id=$1',[row.application_id])).length,1,'view-only casting can read the historical application');
+   assert.equal((await q('SELECT id FROM minor_talent_profiles WHERE id=$1',[minor])).length,0,'history does not restore discovery');
+   assert.equal((await q('SELECT id FROM minor_media WHERE minor_talent_id=$1',[minor])).length,0);
+   assert.equal((await q("UPDATE role_candidates SET status='shortlist' WHERE id=$1 RETURNING id",[candidate])).length,0,'view-only cannot progress');
+   assert.equal((await q("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[candidate])).length,0,'view-only cannot close');
+   await as(a);assert.equal((await q("UPDATE work_applications SET status='withdrawn' WHERE id=$1 RETURNING id",[row.application_id])).length,1);
+   await as(b);assert.equal((await q("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[candidate])).length,1);
+   await db.exec('RESET ROLE');await q("UPDATE project_members SET status='removed' WHERE project_id=$1 AND user_id=$2",[project,c]);
+   await as(c);assert.equal((await q('SELECT id FROM role_candidates WHERE id=$1',[candidate])).length,0);
+   assert.equal((await q('SELECT id FROM work_applications WHERE id=$1',[row.application_id])).length,0);
+   await as(null,'anon');await denied('SELECT id FROM role_candidates');
+  }finally{await db.exec('ROLLBACK; RESET ROLE');}
+ });
+ await t.test('legacy application history without original context fails closed and can still be rejected',async()=>{
+  await db.exec('RESET ROLE; BEGIN');
+  try{
+   await as(b);const r=await scalar("INSERT INTO casting_roles(project_id,title) VALUES($1,'Historical role') RETURNING id",[project]);
+   const application=await scalar('SELECT application_id FROM role_candidates WHERE id=$1',[candidate]);
+   // Trusted fixture simulates a pre-correction record, never a browser bypass.
+   await db.exec('RESET ROLE; ALTER TABLE role_candidates DISABLE TRIGGER minor_candidate_source');
+   const id=await scalar("INSERT INTO role_candidates(role_id,casting_subject_id,application_id,source) VALUES($1,$2,$3,'application') RETURNING id",[r,subject,application]);
+   await db.exec('ALTER TABLE role_candidates ENABLE TRIGGER minor_candidate_source');
+   await as(b);assert.equal(await scalar('SELECT minor_application_project_id FROM role_candidates WHERE id=$1',[id]),null);
+   await db.exec('SAVEPOINT active');await denied("UPDATE role_candidates SET status='review' WHERE id=$1 RETURNING id",[id]);await db.exec('ROLLBACK TO active');
+   assert.equal((await q("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[id])).length,1);
+   assert.equal(await scalar('SELECT minor_application_work_hash FROM role_candidates WHERE id=$1',[id]),null,'no fabricated historical evidence');
+  }finally{await db.exec('ROLLBACK; RESET ROLE');}
+ });
+ await t.test('safe closure of an approved minor still requires approval authority, never renewed consent',async()=>{
+  await db.exec('RESET ROLE; BEGIN');
+  try{
+   await as(b);await q("UPDATE role_candidates SET status='approved' WHERE id=$1",[candidate]);
+   await as(a);await q('UPDATE minor_project_consents SET revoked_at=now() WHERE casting_subject_id=$1 AND project_id=$2',[subject,project]);
+   await as(c);await db.exec('SAVEPOINT approval');await denied("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[candidate]);await db.exec('ROLLBACK TO approval');
+   await as(b);assert.equal((await q("UPDATE role_candidates SET status='rejected' WHERE id=$1 RETURNING id",[candidate])).length,1);
+   await db.exec('RESET ROLE');assert.equal(await scalar('SELECT count(*)::int FROM minor_project_consents WHERE casting_subject_id=$1 AND revoked_at IS NULL',[subject]),0);
+  }finally{await db.exec('ROLLBACK; RESET ROLE');}
  });
  await t.test('unrelated responsible adult cannot accept even a reviewed row; browser cannot manufacture review',async()=>{
   await db.exec('RESET ROLE');await q("INSERT INTO minor_project_responsibilities(project_id,adult_user_id,policy_version,reviewed_by,valid_until) VALUES($1,$2,'v1',$3,now()+interval '1 month')",[project,d,b]);

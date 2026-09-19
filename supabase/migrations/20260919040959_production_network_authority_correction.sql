@@ -59,7 +59,31 @@ GRANT EXECUTE ON FUNCTION filmverse_private.project_casting_can(uuid,text),filmv
 ALTER POLICY roles_read ON public.casting_roles USING(filmverse_private.project_casting_can(project_id,'view_casting'));
 ALTER POLICY roles_create ON public.casting_roles WITH CHECK(created_by=auth.uid() AND filmverse_private.project_casting_can(project_id,'manage_candidates'));
 ALTER POLICY roles_update ON public.casting_roles USING(filmverse_private.project_casting_can(project_id,'manage_candidates')) WITH CHECK(filmverse_private.project_casting_can(project_id,'manage_candidates'));
-ALTER POLICY candidates_read ON public.role_candidates USING(filmverse_private.casting_permission(role_id,'view_casting') AND filmverse_private.subject_visible(casting_subject_id));
+-- Historical casting records are not discovery or current consent. Do not hide them
+-- when a guardian is revoked; current project casting authority still gates access.
+CREATE FUNCTION filmverse_private.candidate_history_visible(p_candidate uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM public.role_candidates c
+ JOIN public.casting_subjects s ON s.id=c.casting_subject_id WHERE c.id=p_candidate
+ AND filmverse_private.casting_permission(c.role_id,'view_casting')
+ AND (s.subject_type='minor' OR filmverse_private.subject_visible(s.id)))
+$$;
+CREATE FUNCTION filmverse_private.minor_application_history_visible(p_application uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM public.role_candidates c
+ JOIN public.casting_subjects s ON s.id=c.casting_subject_id AND s.subject_type='minor'
+ WHERE c.application_id=p_application AND filmverse_private.casting_permission(c.role_id,'view_casting'))
+$$;
+REVOKE ALL ON FUNCTION filmverse_private.candidate_history_visible(uuid),filmverse_private.minor_application_history_visible(uuid) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION filmverse_private.candidate_history_visible(uuid),filmverse_private.minor_application_history_visible(uuid) TO authenticated;
+ALTER POLICY candidates_read ON public.role_candidates USING(
+ (filmverse_private.casting_permission(role_id,'view_casting') AND filmverse_private.subject_visible(casting_subject_id))
+ OR filmverse_private.candidate_history_visible(id));
+ALTER POLICY candidates_update ON public.role_candidates
+ USING(filmverse_private.casting_permission(role_id,'manage_candidates') AND filmverse_private.candidate_history_visible(id))
+ WITH CHECK(filmverse_private.casting_permission(role_id,'manage_candidates'));
+CREATE POLICY minor_application_casting_history ON public.work_applications FOR SELECT TO authenticated
+ USING(filmverse_private.minor_application_history_visible(id));
 ALTER POLICY auditions_read ON public.auditions USING(filmverse_private.candidate_permission(role_candidate_id,'view_casting'));
 ALTER POLICY auditions_create ON public.auditions WITH CHECK(created_by=auth.uid() AND filmverse_private.candidate_permission(role_candidate_id,'manage_auditions'));
 ALTER POLICY auditions_update ON public.auditions USING(filmverse_private.candidate_permission(role_candidate_id,'manage_auditions')) WITH CHECK(filmverse_private.candidate_permission(role_candidate_id,'manage_auditions'));
@@ -162,17 +186,27 @@ GRANT ALL ON public.minor_casting_invitations TO service_role;
 GRANT SELECT ON public.minor_casting_invitations TO authenticated;
 CREATE POLICY minor_invitation_read ON public.minor_casting_invitations FOR SELECT TO authenticated USING(
  guardian_user_id=auth.uid() OR filmverse_private.casting_permission(role_id,'view_casting'));
--- The original invitation context must still be current, not just independently valid.
-CREATE FUNCTION filmverse_private.minor_invitation_context_current(i public.minor_casting_invitations) RETURNS boolean
+-- Shared current authority for all sources, including guardian-submitted applications.
+CREATE FUNCTION filmverse_private.minor_casting_context_current(p_subject uuid,p_role uuid,p_work uuid,p_project uuid,p_guardian uuid,p_work_hash text) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT EXISTS(
- SELECT 1 FROM public.casting_roles r JOIN public.work_opportunities w ON w.id=i.work_id
- JOIN public.casting_subjects s ON s.id=i.casting_subject_id
- JOIN public.minor_guardians g ON g.minor_talent_id=s.minor_talent_id AND g.guardian_user_id=i.guardian_user_id
- WHERE r.id=i.role_id AND r.status='open' AND r.project_id=i.project_id AND w.project_id=i.project_id
+ SELECT 1 FROM public.casting_roles r JOIN public.work_opportunities w ON w.id=p_work
+ JOIN public.casting_subjects s ON s.id=p_subject AND s.subject_type='minor'
+ JOIN public.minor_guardians g ON g.minor_talent_id=s.minor_talent_id AND g.guardian_user_id=p_guardian
+ WHERE r.id=p_role AND r.status='open' AND r.project_id=p_project AND w.project_id=p_project
  AND w.minor_opportunity AND filmverse_private.minor_work_reviewed(w.id)
- AND i.work_content_hash=encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex')
+ AND p_work_hash=encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex')
  AND g.status='approved' AND g.valid_until>statement_timestamp())
+$$;
+CREATE FUNCTION filmverse_private.minor_casting_consent_current(p_subject uuid,p_project uuid,p_guardian uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT EXISTS(SELECT 1 FROM public.minor_project_consents c WHERE c.casting_subject_id=p_subject
+ AND c.project_id=p_project AND c.guardian_user_id=p_guardian AND c.scope='application'
+ AND c.revoked_at IS NULL AND c.expires_at>statement_timestamp())
+$$;
+CREATE FUNCTION filmverse_private.minor_invitation_context_current(i public.minor_casting_invitations) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT filmverse_private.minor_casting_context_current(i.casting_subject_id,i.role_id,i.work_id,i.project_id,i.guardian_user_id,i.work_content_hash)
 $$;
 CREATE FUNCTION filmverse_private.minor_invitation_pending_current(i public.minor_casting_invitations) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
@@ -182,11 +216,10 @@ CREATE FUNCTION filmverse_private.minor_accepted_candidate_authority(i public.mi
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT i.status='accepted' AND i.responded_at IS NOT NULL AND i.responded_at<i.expires_at
  AND filmverse_private.minor_invitation_context_current(i)
- AND EXISTS(SELECT 1 FROM public.minor_project_consents c WHERE c.casting_subject_id=i.casting_subject_id
- AND c.project_id=i.project_id AND c.guardian_user_id=i.guardian_user_id AND c.scope='application'
- AND c.revoked_at IS NULL AND c.expires_at>statement_timestamp())
+ AND filmverse_private.minor_casting_consent_current(i.casting_subject_id,i.project_id,i.guardian_user_id)
 $$;
-REVOKE ALL ON FUNCTION filmverse_private.minor_invitation_context_current(public.minor_casting_invitations),
+REVOKE ALL ON FUNCTION filmverse_private.minor_casting_context_current(uuid,uuid,uuid,uuid,uuid,text),
+ filmverse_private.minor_casting_consent_current(uuid,uuid,uuid),filmverse_private.minor_invitation_context_current(public.minor_casting_invitations),
  filmverse_private.minor_invitation_pending_current(public.minor_casting_invitations),
  filmverse_private.minor_accepted_candidate_authority(public.minor_casting_invitations) FROM PUBLIC,anon,authenticated;
 CREATE FUNCTION filmverse_private.minor_contact(p_subject uuid,p_role uuid,p_work uuid) RETURNS uuid
@@ -249,13 +282,41 @@ END $$;
 CREATE FUNCTION public.minor_invitation_respond(p_id uuid,p_accept boolean,p_terms text,p_until timestamptz) RETURNS void LANGUAGE sql SECURITY INVOKER SET search_path='' AS $$
  SELECT filmverse_private.minor_invitation_respond(p_id,p_accept,p_terms,p_until)
 $$;
+-- Server-only immutable context binds application candidates to their original project
+-- and reviewed work version. Legacy rows stay readable/closable; never fabricate consent
+-- or backfill historical authority from today's work state.
+ALTER TABLE public.role_candidates
+ ADD COLUMN minor_application_project_id uuid REFERENCES public.projects(id),
+ ADD COLUMN minor_application_work_hash text CHECK(minor_application_work_hash ~ '^[0-9a-f]{64}$');
 CREATE FUNCTION filmverse_private.minor_candidate_source_guard() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- IF NEW.source<>'application' AND EXISTS(SELECT 1 FROM public.casting_subjects WHERE id=NEW.casting_subject_id AND subject_type='minor')
- AND (NOT filmverse_private.casting_permission(NEW.role_id,'manage_candidates') OR NOT EXISTS(
+ IF NOT EXISTS(SELECT 1 FROM public.casting_subjects WHERE id=NEW.casting_subject_id AND subject_type='minor') THEN RETURN NEW;END IF;
+ IF NOT filmverse_private.casting_permission(NEW.role_id,'manage_candidates') THEN
+ RAISE EXCEPTION 'casting_authority_required' USING ERRCODE='42501';END IF;
+ IF TG_OP='UPDATE' THEN
+ IF (NEW.role_id,NEW.casting_subject_id,NEW.application_id,NEW.source,NEW.minor_application_project_id,NEW.minor_application_work_hash)
+ IS DISTINCT FROM (OLD.role_id,OLD.casting_subject_id,OLD.application_id,OLD.source,OLD.minor_application_project_id,OLD.minor_application_work_hash) THEN
+ RAISE EXCEPTION 'immutable_minor_candidate_context' USING ERRCODE='42501';END IF;
+ -- Only an existing row's status may change on the consent-free terminal path.
+ -- This cannot insert a candidate, edit tags, switch source/context or reopen it.
+ IF NEW.status='rejected' AND (to_jsonb(NEW)-'status')=(to_jsonb(OLD)-'status') THEN RETURN NEW;END IF;
+ ELSIF NEW.source='application' THEN
+ SELECT w.project_id,encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex')
+ INTO NEW.minor_application_project_id,NEW.minor_application_work_hash
+ FROM public.work_applications a JOIN public.work_opportunities w ON w.id=a.work_id
+ WHERE a.id=NEW.application_id AND a.casting_subject_id=NEW.casting_subject_id;
+ END IF;
+ IF NEW.source='application' THEN
+ IF NOT EXISTS(SELECT 1 FROM public.work_applications a WHERE a.id=NEW.application_id
+ AND a.casting_subject_id=NEW.casting_subject_id AND a.status='applied'
+ AND filmverse_private.minor_casting_context_current(NEW.casting_subject_id,NEW.role_id,a.work_id,NEW.minor_application_project_id,a.submitted_by,NEW.minor_application_work_hash)
+ AND filmverse_private.minor_casting_consent_current(NEW.casting_subject_id,NEW.minor_application_project_id,a.submitted_by)) THEN
+ RAISE EXCEPTION 'current_minor_application_authority_required' USING ERRCODE='42501';END IF;
+ ELSIF NOT EXISTS(
  SELECT 1 FROM public.minor_casting_invitations i WHERE i.casting_subject_id=NEW.casting_subject_id AND i.role_id=NEW.role_id
- AND filmverse_private.minor_accepted_candidate_authority(i))) THEN
- RAISE EXCEPTION 'accepted_guardian_invitation_required' USING ERRCODE='42501';END IF;RETURN NEW;
+ AND filmverse_private.minor_accepted_candidate_authority(i)) THEN
+ RAISE EXCEPTION 'accepted_guardian_invitation_required' USING ERRCODE='42501';END IF;
+ RETURN NEW;
 END $$;
 CREATE TRIGGER minor_candidate_source BEFORE INSERT OR UPDATE ON public.role_candidates FOR EACH ROW EXECUTE FUNCTION filmverse_private.minor_candidate_source_guard();
 DO $$ DECLARE f record;BEGIN
