@@ -4,6 +4,7 @@ import { useSearchIndexing } from '../hooks/useSearchIndexing';
 import { useAuth } from '../hooks/useAuth';
 import { useOrganization } from '../hooks/useOrganization';
 import { CreateDialog } from '../components/create/CreateDialog';
+import { ProjectNeeds } from '../components/ProjectNeeds';
 import { CastingWorkspace } from '../components/CastingWorkspace';
 import { ProjectSupport } from '../components/StudentSupport';
 type Project = { title: string; city: string | null; logline: string | null; description: string | null; stage: string | null; user_id: string | null; organization_id: string | null; visibility: string; student_project: boolean; thesis_project: boolean };
@@ -32,6 +33,7 @@ export function ProjectPage({ id }: { id: string }) {
   {canManage&&<form className="space-y-3 border-t border-line-soft pt-4" onSubmit={e=>{e.preventDefault();const d=new FormData(e.currentTarget);setSaving(true);setError('');void(async()=>{try{const values={title:String(d.get('title')),description:String(d.get('description')),visibility:String(d.get('visibility'))};const r=await supabase.from('projects').update(values).eq('id',id).select('id').single();if(r.error)throw r.error;setRow({...row,...values});}catch{setError('Изменения не сохранены.');}finally{setSaving(false);}})();}}><h2 className="font-semibold">Управление проектом</h2><label className="block">Название<input name="title" className="input-field w-full" required minLength={2} maxLength={200} defaultValue={row.title}/></label><label className="block">Описание<textarea name="description" className="input-field w-full" maxLength={5000} defaultValue={row.description||''}/></label><label className="block">Видимость<select name="visibility" className="input-field" defaultValue={row.visibility}><option value="private">Приватный</option><option value="unlisted">По прямой ссылке</option><option value="public">Публичный</option></select></label><button className="btn-secondary" disabled={saving}>Сохранить проект</button>{error&&<p role="alert">{error}</p>}</form>}
   {canManage&&<button className="btn-secondary" onClick={()=>setHiring(true)}>Найти модель / актёра / специалиста</button>}
   {hiring&&<CreateDialog initialKind="work" allowKindSwitch={false} projectSource={{id,title:row.title,city:row.city||'',visibility:row.visibility}} onClose={()=>setHiring(false)} onCreated={()=>setHiring(false)}/>}
+  {canManage&&<ProjectNeeds projectId={id}/>}
   {canManage&&<CastingWorkspace projectId={id}/>}
   {row.student_project&&<ProjectSupport projectId={id} verified={verified} canManage={canManage}/>}</article>;
 }
