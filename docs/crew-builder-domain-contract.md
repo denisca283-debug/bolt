@@ -14,6 +14,10 @@ Contract and canonical need creation/list UI; NOT full Crew Builder or automatic
 Need creation does not invite, award, book, approve compliance or commit a person.
 Student Guided Mode must reuse this engine rather than create parallel educational needs.
 
+## Settlement independence
+
+A later award/contract may create a domain-denominated obligation, not a wallet transaction. Crew Builder does not depend on any rail, asset or chain. See [digital-assets-blockchain-readiness.md](digital-assets-blockchain-readiness.md). No payment or escrow implementation exists.
+
 ## FUTURE DEPENDENCY
 
 Evidence-backed resolution candidates, availability validation, multi-constraint matching, per-role shortlist, explicit budget scenarios, user-approved invites and accessible guided mode.

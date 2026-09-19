@@ -18,6 +18,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - name: Real PostgreSQL sourcing concurrency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql
+          FILMVERSE_PG_BIN="$(pg_config --bindir)" npm run test:concurrency
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
