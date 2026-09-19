@@ -37,6 +37,8 @@ Bidder/qualification/award UI, participant notice delivery, private attachments,
 
 ## RELEASE BLOCKER
 
+Foundation freeze blocker correction: raw commercial_offer_provenance requires existing org_can(provider_organization_id, 'manage_organization') authority (current active owner/admin), not view_sourcing, prepare_bid or submit_bid. No new permission domain is introduced. Cross-company and revoked management are denied. The accepted safe discovery projection and private eligibility boundary are unchanged; service_role retains raw worker access.
+
 Hosted staging role/JWT/PostgREST validation, operations/rate limits, independent fairness review and supplier UX. No auction for casting talent or minors; no binding professional commitment via graph membership. No production migration.
 
 ## Verification
