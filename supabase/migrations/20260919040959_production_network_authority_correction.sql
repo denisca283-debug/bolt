@@ -139,12 +139,23 @@ CREATE TABLE public.minor_casting_invitations (
  role_id uuid NOT NULL REFERENCES public.casting_roles(id),work_id uuid NOT NULL REFERENCES public.work_opportunities(id),
  project_id uuid NOT NULL REFERENCES public.projects(id),work_content_hash text NOT NULL,
  invited_by uuid NOT NULL REFERENCES public.profiles(id),guardian_user_id uuid NOT NULL REFERENCES public.profiles(id),
- status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined')),
+ status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined','expired')),
  created_at timestamptz NOT NULL DEFAULT now(),responded_at timestamptz,
  expires_at timestamptz NOT NULL DEFAULT now()+interval '30 days',
  CHECK(expires_at>created_at AND expires_at<=created_at+interval '30 days'),
- UNIQUE(casting_subject_id,role_id,work_id)
+ CHECK(status NOT IN ('accepted','declined') OR (responded_at IS NOT NULL AND responded_at>=created_at AND responded_at<expires_at))
 );
+CREATE UNIQUE INDEX minor_invitation_current_episode ON public.minor_casting_invitations(casting_subject_id,role_id,work_id)
+ WHERE status IN ('pending','accepted');
+CREATE INDEX minor_invitation_history_context ON public.minor_casting_invitations(casting_subject_id,role_id,work_id);
+CREATE FUNCTION filmverse_private.minor_invitation_history_guard() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+ IF OLD.status IN ('expired','declined') THEN RAISE EXCEPTION 'invitation_history_immutable' USING ERRCODE='23514';END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION filmverse_private.minor_invitation_history_guard() FROM PUBLIC,anon,authenticated;
+CREATE TRIGGER minor_invitation_history BEFORE UPDATE OR DELETE ON public.minor_casting_invitations
+ FOR EACH ROW EXECUTE FUNCTION filmverse_private.minor_invitation_history_guard();
 ALTER TABLE public.minor_casting_invitations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.minor_casting_invitations FROM PUBLIC,anon,authenticated;
 GRANT ALL ON public.minor_casting_invitations TO service_role;
@@ -152,9 +163,9 @@ GRANT SELECT ON public.minor_casting_invitations TO authenticated;
 CREATE POLICY minor_invitation_read ON public.minor_casting_invitations FOR SELECT TO authenticated USING(
  guardian_user_id=auth.uid() OR filmverse_private.casting_permission(role_id,'view_casting'));
 -- The original invitation context must still be current, not just independently valid.
-CREATE FUNCTION filmverse_private.minor_invitation_current(i public.minor_casting_invitations) RETURNS boolean
+CREATE FUNCTION filmverse_private.minor_invitation_context_current(i public.minor_casting_invitations) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
- SELECT i.expires_at>statement_timestamp() AND EXISTS(
+ SELECT EXISTS(
  SELECT 1 FROM public.casting_roles r JOIN public.work_opportunities w ON w.id=i.work_id
  JOIN public.casting_subjects s ON s.id=i.casting_subject_id
  JOIN public.minor_guardians g ON g.minor_talent_id=s.minor_talent_id AND g.guardian_user_id=i.guardian_user_id
@@ -163,11 +174,30 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  AND i.work_content_hash=encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex')
  AND g.status='approved' AND g.valid_until>statement_timestamp())
 $$;
-REVOKE ALL ON FUNCTION filmverse_private.minor_invitation_current(public.minor_casting_invitations) FROM PUBLIC,anon,authenticated;
+CREATE FUNCTION filmverse_private.minor_invitation_pending_current(i public.minor_casting_invitations) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT i.status='pending' AND i.expires_at>statement_timestamp() AND filmverse_private.minor_invitation_context_current(i)
+$$;
+CREATE FUNCTION filmverse_private.minor_accepted_candidate_authority(i public.minor_casting_invitations) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT i.status='accepted' AND i.responded_at IS NOT NULL AND i.responded_at<i.expires_at
+ AND filmverse_private.minor_invitation_context_current(i)
+ AND EXISTS(SELECT 1 FROM public.minor_project_consents c WHERE c.casting_subject_id=i.casting_subject_id
+ AND c.project_id=i.project_id AND c.guardian_user_id=i.guardian_user_id AND c.scope='application'
+ AND c.revoked_at IS NULL AND c.expires_at>statement_timestamp())
+$$;
+REVOKE ALL ON FUNCTION filmverse_private.minor_invitation_context_current(public.minor_casting_invitations),
+ filmverse_private.minor_invitation_pending_current(public.minor_casting_invitations),
+ filmverse_private.minor_accepted_candidate_authority(public.minor_casting_invitations) FROM PUBLIC,anon,authenticated;
 CREATE FUNCTION filmverse_private.minor_contact(p_subject uuid,p_role uuid,p_work uuid) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE mid uuid; guardian uuid; invitation uuid;
 BEGIN
+ IF NOT filmverse_private.network_permission('search_minor_talent') OR NOT filmverse_private.casting_permission(p_role,'manage_candidates') THEN
+ RAISE EXCEPTION 'reviewed_casting_context_required' USING ERRCODE='42501';END IF;
+ -- Serialize episode issuance and guardian replies in role -> work -> invitation order.
+ PERFORM 1 FROM public.casting_roles WHERE id=p_role FOR UPDATE;
+ PERFORM 1 FROM public.work_opportunities WHERE id=p_work FOR SHARE;
  IF NOT filmverse_private.network_permission('search_minor_talent') OR NOT filmverse_private.casting_permission(p_role,'manage_candidates')
  OR NOT EXISTS(SELECT 1 FROM public.casting_roles r JOIN public.work_opportunities w ON w.project_id=r.project_id
  WHERE r.id=p_role AND r.status='open' AND w.id=p_work AND w.minor_opportunity AND filmverse_private.minor_work_reviewed(w.id)) THEN
@@ -177,13 +207,18 @@ BEGIN
  SELECT guardian_user_id INTO guardian FROM public.minor_guardians WHERE minor_talent_id=mid AND status='approved'
  AND valid_until>now() AND filmverse_private.person_contactable(guardian_user_id,'invite') ORDER BY is_primary DESC,id LIMIT 1;
  IF guardian IS NULL THEN RAISE EXCEPTION 'contact_unavailable' USING ERRCODE='42501';END IF;
+ IF EXISTS(SELECT 1 FROM public.minor_casting_invitations WHERE casting_subject_id=p_subject AND role_id=p_role AND work_id=p_work AND status='declined') THEN
+ RAISE EXCEPTION 'guardian_decline_requires_deliberate_reopen' USING ERRCODE='42501';END IF;
+ UPDATE public.minor_casting_invitations SET status='expired'
+ WHERE casting_subject_id=p_subject AND role_id=p_role AND work_id=p_work AND status='pending' AND expires_at<=clock_timestamp();
  INSERT INTO public.minor_casting_invitations(casting_subject_id,role_id,work_id,project_id,work_content_hash,invited_by,guardian_user_id)
  SELECT p_subject,p_role,p_work,w.project_id,encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex'),auth.uid(),guardian
  FROM public.work_opportunities w WHERE w.id=p_work
- ON CONFLICT(casting_subject_id,role_id,work_id) DO NOTHING RETURNING id INTO invitation;
+ ON CONFLICT(casting_subject_id,role_id,work_id) WHERE status IN ('pending','accepted') DO NOTHING RETURNING id INTO invitation;
  IF invitation IS NULL THEN SELECT id INTO invitation FROM public.minor_casting_invitations
- WHERE casting_subject_id=p_subject AND role_id=p_role AND work_id=p_work AND guardian_user_id=guardian AND status<>'declined'
- AND filmverse_private.minor_invitation_current(minor_casting_invitations);END IF;
+ WHERE casting_subject_id=p_subject AND role_id=p_role AND work_id=p_work AND guardian_user_id=guardian
+ AND (filmverse_private.minor_invitation_pending_current(minor_casting_invitations)
+ OR filmverse_private.minor_accepted_candidate_authority(minor_casting_invitations));END IF;
  IF invitation IS NULL THEN RAISE EXCEPTION 'invitation_unavailable' USING ERRCODE='42501';END IF;
  -- Invitation is not a DM or a candidate. Guardian explicitly responds first.
  RETURN invitation;
@@ -195,34 +230,34 @@ CREATE FUNCTION filmverse_private.minor_invitation_respond(p_id uuid,p_accept bo
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE i public.minor_casting_invitations; project uuid;
 BEGIN
+ SELECT * INTO i FROM public.minor_casting_invitations WHERE id=p_id;
+ IF NOT FOUND OR auth.uid() IS DISTINCT FROM i.guardian_user_id THEN RAISE EXCEPTION 'guardian_invitation_unavailable' USING ERRCODE='42501';END IF;
+ SELECT project_id INTO project FROM public.casting_roles WHERE id=i.role_id FOR UPDATE;
+ PERFORM 1 FROM public.work_opportunities WHERE id=i.work_id FOR SHARE;
  SELECT * INTO i FROM public.minor_casting_invitations WHERE id=p_id FOR UPDATE;
  IF NOT FOUND OR auth.uid() IS DISTINCT FROM i.guardian_user_id OR NOT filmverse_private.subject_manage(i.casting_subject_id)
  OR i.status<>'pending' OR i.expires_at<=clock_timestamp() OR p_accept IS NULL THEN RAISE EXCEPTION 'guardian_invitation_unavailable' USING ERRCODE='42501';END IF;
- SELECT project_id INTO project FROM public.casting_roles WHERE id=i.role_id FOR SHARE;
- PERFORM 1 FROM public.work_opportunities WHERE id=i.work_id FOR SHARE;
  IF p_accept THEN
- IF NOT filmverse_private.minor_invitation_current(i) OR i.expires_at<=clock_timestamp()
+ IF NOT filmverse_private.minor_invitation_pending_current(i) OR i.expires_at<=clock_timestamp()
  OR p_until IS NULL OR p_until<=clock_timestamp() OR p_until>now()+interval '90 days' THEN
  RAISE EXCEPTION 'reviewed_context_and_bounded_consent_required' USING ERRCODE='42501';END IF;
  INSERT INTO public.minor_project_consents(casting_subject_id,project_id,guardian_user_id,scope,terms_version,expires_at)
  VALUES(i.casting_subject_id,project,auth.uid(),'application',p_terms,p_until);
  END IF;
- UPDATE public.minor_casting_invitations SET status=CASE WHEN p_accept THEN 'accepted' ELSE 'declined' END,responded_at=now() WHERE id=p_id;
+ UPDATE public.minor_casting_invitations SET status=CASE WHEN p_accept THEN 'accepted' ELSE 'declined' END,responded_at=clock_timestamp() WHERE id=p_id;
 END $$;
 CREATE FUNCTION public.minor_invitation_respond(p_id uuid,p_accept boolean,p_terms text,p_until timestamptz) RETURNS void LANGUAGE sql SECURITY INVOKER SET search_path='' AS $$
  SELECT filmverse_private.minor_invitation_respond(p_id,p_accept,p_terms,p_until)
 $$;
 CREATE FUNCTION filmverse_private.minor_candidate_source_guard() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- IF (TG_OP='INSERT' OR NEW.status<>'rejected') AND NEW.source<>'application' AND EXISTS(SELECT 1 FROM public.casting_subjects WHERE id=NEW.casting_subject_id AND subject_type='minor')
- AND NOT EXISTS(SELECT 1 FROM public.minor_casting_invitations i WHERE i.casting_subject_id=NEW.casting_subject_id AND i.role_id=NEW.role_id
- AND i.status='accepted' AND filmverse_private.minor_invitation_current(i)
- AND EXISTS(SELECT 1 FROM public.minor_project_consents c WHERE c.casting_subject_id=i.casting_subject_id
- AND c.project_id=i.project_id AND c.guardian_user_id=i.guardian_user_id AND c.scope='application'
- AND c.revoked_at IS NULL AND c.expires_at>statement_timestamp())) THEN
+ IF NEW.source<>'application' AND EXISTS(SELECT 1 FROM public.casting_subjects WHERE id=NEW.casting_subject_id AND subject_type='minor')
+ AND (NOT filmverse_private.casting_permission(NEW.role_id,'manage_candidates') OR NOT EXISTS(
+ SELECT 1 FROM public.minor_casting_invitations i WHERE i.casting_subject_id=NEW.casting_subject_id AND i.role_id=NEW.role_id
+ AND filmverse_private.minor_accepted_candidate_authority(i))) THEN
  RAISE EXCEPTION 'accepted_guardian_invitation_required' USING ERRCODE='42501';END IF;RETURN NEW;
 END $$;
-CREATE TRIGGER minor_candidate_source BEFORE INSERT OR UPDATE OF role_id,casting_subject_id,source,status ON public.role_candidates FOR EACH ROW EXECUTE FUNCTION filmverse_private.minor_candidate_source_guard();
+CREATE TRIGGER minor_candidate_source BEFORE INSERT OR UPDATE ON public.role_candidates FOR EACH ROW EXECUTE FUNCTION filmverse_private.minor_candidate_source_guard();
 DO $$ DECLARE f record;BEGIN
  FOR f IN SELECT p.oid::regprocedure sig,p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
  WHERE n.nspname IN ('public','filmverse_private') AND p.proname IN ('responsible_adult_associated','responsible_adult_ready','responsibility_accept','minor_responsibility_accept','minor_responsibility_guard','minor_candidate_source_guard','minor_invitation_respond') LOOP

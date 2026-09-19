@@ -6,7 +6,7 @@ PR5 remains frozen at b0e46cf2754b74a23d3e8a8f13c6fe1eda036305. Final micro-corr
 
 Current-only relationship uniqueness replaces all-history uniqueness. Terminal episodes remain immutable; requests can create a new pending episode after end/decline/expiry. Public graph still requires a current active relationship and bilateral publication consent.
 
-Minor invitations have a server-controlled maximum lifetime of 30 days, bound to the original project and opportunity content hash. Acceptance and candidate activation revalidate the open role, matching original context, live guardian authority, reviewed opportunity and responsible adult; consent remains bounded. Expired invitations are preserved and cannot activate candidates.
+Foundation freeze correction separates pending acceptance validity from accepted candidate authority. Pending invitations have a server-controlled maximum acceptance window of 30 days. A timely accepted episode does not expire the candidate on day 30; activation and all later updates revalidate casting authority, original project/role/work/hash, open role, reviewed opportunity/responsible adult and current unrevoked guardian consent/authority. Reissue serializes on role/work locks, marks stale pending episodes expired and creates a new episode; old dates remain unchanged. Expired/declined rows are immutable, and explicit decline blocks automatic reissue. No new product feature or deliberate reopen flow.
 
 Do not apply PR6 alone to shared environments. The live database precedes the PR3–PR7 stack; future staging must use the complete pending stack in chronological filename order in one reviewed plan. No migration renames, repair or include-all shortcuts.
 

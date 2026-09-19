@@ -8,7 +8,7 @@ Separate adult auth identity and casting subject. Minor has no account. Approved
 
 ## FOUNDATION ONLY
 
-Invitations expire at a server-assigned deadline no later than 30 days after creation. Acceptance and search/invitation candidate activation recheck the original project and opportunity content hash, open role, live reviewed opportunity/responsible adult and current guardian authority. Accepted invitations must remain unexpired; candidate activation also needs live project consent. Expired rows remain history, not deletions or renewed authority.
+Pending invitations have a server-assigned acceptance deadline no later than 30 days after creation. Acceptance rechecks that deadline, original project/opportunity hash, open role, reviewed opportunity/responsible adult and current guardian authority. After timely acceptance, the original deadline is not candidate expiry: activation and every later candidate update require current casting authority, the same valid context and current unrevoked project-specific guardian consent. Role closure, changed/unreviewed work, revoked/expired consent or guardian authority block changes. Reissue locks role/work context, closes stale pending episodes as expired, and creates a new episode without overwriting old dates. Only one pending/accepted episode exists per subject/role/work. Expired/declined rows are immutable; explicit decline blocks automatic re-invitation for that context. No deliberate reopen feature is implemented.
 
 Jurisdiction-aware factual compliance, secondary guardian rows, private legal facts and sanitized-media metadata. No legal-compliance badge.
 

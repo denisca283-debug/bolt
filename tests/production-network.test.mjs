@@ -97,7 +97,7 @@ test('production network: full replay, casting, guardians, graph, education and 
  });
  await t.test('minor invitations expire and revalidate role, original context, guardian and responsibility before acceptance',async()=>{
   const scenarios=[
-   ['expired',async(id)=>q("UPDATE minor_casting_invitations SET created_at=now()-interval '31 days',expires_at=now()-interval '1 day' WHERE id=$1",[id])],
+   ['expired',async(id)=>q("UPDATE minor_casting_invitations SET created_at=created_at-interval '31 days',expires_at=expires_at-interval '31 days',responded_at=responded_at-interval '31 days' WHERE id=$1",[id])],
    ['closed role',async(id,r)=>q("UPDATE casting_roles SET status='closed' WHERE id=$1",[r])],
    ['revoked guardian',async()=>q("UPDATE minor_guardians SET status='revoked' WHERE id=$1",[guardian])],
    ['changed opportunity',async()=>q("UPDATE work_opportunities SET title='Changed safeguards' WHERE id=$1",[minorWork])],
@@ -120,13 +120,71 @@ test('production network: full replay, casting, guardians, graph, education and 
   await db.exec('RESET ROLE');await assert.rejects(q("UPDATE minor_casting_invitations SET expires_at=created_at+interval '31 days' WHERE id=$1",[id]),e=>e.code==='23514');
   await as(a);await denied("SELECT minor_invitation_respond($1,true,'v3',now()+interval '91 days')",[id]);
   await q("SELECT minor_invitation_respond($1,true,'v3',now()+interval '1 week')",[id]);
-  for(const [,mutate] of scenarios){
+  for(const [label,mutate] of scenarios){
    await as(b);
    await db.exec('RESET ROLE; BEGIN');
-   try{await mutate(id,r);await as(b);await denied("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[r,subject]);}
+   try{
+    await mutate(id,r);await as(b);
+    if(label==='expired')assert.equal((await q("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation') RETURNING id",[r,subject])).length,1);
+    else await denied("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[r,subject]);
+   }
    finally{await db.exec('ROLLBACK; RESET ROLE');}
   }
   await as(b);await q("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[r,subject]);
+ });
+ await t.test('expired pending invitation reissues a new episode, preserves immutable history and never bypasses a decline',async()=>{
+  await as(b);const r=await scalar("INSERT INTO casting_roles(project_id,title) VALUES($1,'Reissue role') RETURNING id",[project]);
+  const first=await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);
+  await db.exec('RESET ROLE');await q("UPDATE minor_casting_invitations SET created_at=created_at-interval '31 days',expires_at=expires_at-interval '31 days' WHERE id=$1",[first]);
+  const prior=(await q('SELECT * FROM minor_casting_invitations WHERE id=$1',[first]))[0];
+  await as(a);await denied("SELECT minor_invitation_respond($1,true,'reissue-v1',now()+interval '1 week')",[first]);
+  await as(b);const second=await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);assert.notEqual(first,second);
+  assert.equal(await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]),second);
+  assert.equal(await scalar("SELECT count(*)::int FROM minor_casting_invitations WHERE role_id=$1 AND status='pending'",[r]),1);
+  assert.deepEqual((await q('SELECT * FROM minor_casting_invitations WHERE id=$1',[first]))[0],{...prior,status:'expired'});
+  await db.exec('RESET ROLE');
+  await assert.rejects(q('DELETE FROM minor_casting_invitations WHERE id=$1',[first]),e=>e.code==='23514');
+  await assert.rejects(q("UPDATE minor_casting_invitations SET status='pending' WHERE id=$1",[first]),e=>e.code==='23514');
+  await as(a);await q("SELECT minor_invitation_respond($1,false,NULL,NULL)",[second]);
+  const declined=(await q('SELECT * FROM minor_casting_invitations WHERE id=$1',[second]))[0];
+  await as(b);await denied('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);await denied('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);
+  assert.equal(await scalar('SELECT count(*)::int FROM minor_casting_invitations WHERE role_id=$1',[r]),2);
+  assert.deepEqual((await q('SELECT * FROM minor_casting_invitations WHERE id=$1',[second]))[0],declined);
+ });
+ await t.test('accepted candidate outlives invitation deadline but every later mutation revalidates consent, guardian and context',async()=>{
+  await as(b);const r=await scalar("INSERT INTO casting_roles(project_id,title) VALUES($1,'Long lived candidate') RETURNING id",[project]);
+  const invitation=await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);
+  await as(a);await q("SELECT minor_invitation_respond($1,true,'long-lived',now()+interval '60 days')",[invitation]);
+  await db.exec('RESET ROLE');await q("UPDATE minor_casting_invitations SET created_at=created_at-interval '31 days',expires_at=expires_at-interval '31 days',responded_at=responded_at-interval '31 days' WHERE id=$1",[invitation]);
+  await as(b);assert.equal(await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]),invitation);
+  const id=await scalar("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation') RETURNING id",[r,subject]);
+  assert.equal((await q("UPDATE role_candidates SET status='shortlist' WHERE id=$1 RETURNING id",[id])).length,1);
+  const changes=[
+   async()=>q('UPDATE minor_project_consents SET revoked_at=now() WHERE casting_subject_id=$1 AND project_id=$2',[subject,project]),
+   async()=>q("UPDATE minor_project_consents SET granted_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE casting_subject_id=$1 AND project_id=$2",[subject,project]),
+   async()=>q("UPDATE minor_guardians SET status='revoked' WHERE id=$1",[guardian]),
+   async()=>q("UPDATE work_opportunities SET title='Changed long-lived terms' WHERE id=$1",[minorWork]),
+   async()=>q('DELETE FROM filmverse_private.minor_opportunity_reviews WHERE work_id=$1',[minorWork]),
+   async()=>q('UPDATE minor_project_responsibilities SET revoked_at=now() WHERE project_id=$1',[project]),
+   async()=>q("UPDATE casting_roles SET status='closed' WHERE id=$1",[r]),
+   async()=>{const other=await scalar("INSERT INTO projects(user_id,title) VALUES($1,'Moved role project') RETURNING id",[b]);await q('UPDATE casting_roles SET project_id=$1 WHERE id=$2',[other,r]);},
+  ];
+  for(const mutate of changes){
+   await as(b);await db.exec('RESET ROLE; BEGIN');
+   try{
+    await mutate();await as(b);
+    // RLS may hide a revoked-guardian candidate entirely; either way no mutation is permitted.
+    await db.exec('SAVEPOINT pipeline');
+    try{assert.equal((await q("UPDATE role_candidates SET status='audition' WHERE id=$1 RETURNING id",[id])).length,0);}
+    catch(e){if(e.code!=='42501')throw e;await db.exec('ROLLBACK TO pipeline');}
+    await db.exec('SAVEPOINT tags');
+    try{assert.equal((await q("UPDATE role_candidates SET project_tags=ARRAY['forbidden'] WHERE id=$1 RETURNING id",[id])).length,0);}
+    catch(e){if(e.code!=='42501')throw e;await db.exec('ROLLBACK TO tags');}
+    await db.exec('RESET ROLE');assert.equal(await scalar('SELECT status FROM role_candidates WHERE id=$1',[id]),'shortlist');
+    assert.deepEqual(await scalar('SELECT project_tags FROM role_candidates WHERE id=$1',[id]),[]);
+   }finally{await db.exec('ROLLBACK; RESET ROLE');}
+  }
+  await as(b);assert.equal((await q("UPDATE role_candidates SET project_tags=ARRAY['current consent'] WHERE id=$1 RETURNING id",[id])).length,1);
  });
  await t.test('unrelated responsible adult cannot accept even a reviewed row; browser cannot manufacture review',async()=>{
   await db.exec('RESET ROLE');await q("INSERT INTO minor_project_responsibilities(project_id,adult_user_id,policy_version,reviewed_by,valid_until) VALUES($1,$2,'v1',$3,now()+interval '1 month')",[project,d,b]);
