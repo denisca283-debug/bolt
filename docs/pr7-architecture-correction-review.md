@@ -4,7 +4,7 @@ PR5 remains frozen at `b0e46cf2754b74a23d3e8a8f13c6fe1eda036305`. No merges, dep
 
 ## Stack
 
-- Corrected PR6: `1e28755554974db1d2c8af9e7fb73514d46e97ac`, `epic/production-network-foundation`.
+- Corrected PR6: `a9c14ce991c81b8149e6773254ee35ad241b2623`, `epic/production-network-foundation`.
 - PR7: `epic/sourcing-ai-foundation`, rebased on that exact corrected PR6 head. Old PR7 history is preserved in backup/pr7-before-architecture-correction-20260919; final remote SHA is reported with the PR, rather than embedding its own commit hash here.
 - New PR6 migration: `20260919040959_production_network_authority_correction.sql`.
 - New PR7 migration: `20260919042407_sourcing_commercial_authority_correction.sql`.
@@ -34,6 +34,8 @@ Exact files for this final two-fix pass (8): PR6 — docs/pr6-authority-correcti
 All gates are rerun on the final stack. One previous assertion intentionally changes from denying an accepted, still-consented candidate after its pending deadline to asserting successful activation; new tests independently deny expired pending acceptance and revoked/expired consent, guardian/context failures and declined reissue. No assertions are relaxed to accommodate failures. No accepted graph, referral, sourcing/bid, AI or settlement architecture changes.
 
 ## Part A
+
+Final foundation safety fix: all minor candidate sources now revalidate the same current guardian, project consent, reviewed role/work context and responsible adult for active progression. Application context is server-bound and immutable; withdrawal cannot be bypassed. Existing candidate/application history is readable under current casting authority without restoring minor discovery/media. Status-only rejection preserves history without reviving consent; reopening requires full current authority. Legacy rows with no original-context evidence are history-only, not silently backfilled. PR7 changes no sourcing/AI/settlement architecture in this pass; it is only restacked on corrected PR6 with this report updated. Previous PR7 aef963ad92da8275082112b22dbdfa6bbc04e661 is preserved at backup/pr7-before-final-safety-20260919. All existing gates are rerun; final totals are reported on the PR heads.
 
 See [PR6 authority correction](pr6-authority-correction-review.md). Pending creator can edit only the private draft; approved guardian authority/discovery/consent remains separate. Search permission alone cannot open a guardian DM. Contextual invitation requires manage_candidates plus a role/reviewed minor opportunity in the same project; child activation requires guardian acceptance and live consent. Responsible adult needs factual project association, independent reviewed policy and explicit acceptance. Casting permissions are granular, not inherited from general collaboration or historical company creator identity.
 
