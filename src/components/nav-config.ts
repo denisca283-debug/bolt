@@ -1,10 +1,8 @@
 import {
-  Home,
   Activity,
   Users,
   Briefcase,
   Clapperboard,
-  MessageSquare,
   ShoppingBag,
   type LucideIcon,
 } from 'lucide-react';
@@ -18,23 +16,20 @@ export type NavItem = {
 };
 
 export const navItems: NavItem[] = [
-  { path: '/', label: 'Главная', icon: Home },
-  { path: '/pulse', label: 'Пульс индустрии', icon: Activity },
-  { path: '/actors', label: 'Актёры', icon: Users },
-  { path: '/models', label: 'Модели', icon: Users },
-  { path: '/professionals', label: 'Специалисты', icon: Clapperboard },
-  { path: '/companies', label: 'Компании', icon: Briefcase },
-  { path: '/work', label: 'Работа', icon: Briefcase, badge: 10 },
+  { path: '/work', label: 'Работа', icon: Briefcase },
   { path: '/projects', label: 'Проекты', icon: Clapperboard },
-  { path: '/student-projects', label: 'Студенческие проекты', icon: Clapperboard },
-  { path: '/students', label: 'Студентам', icon: Users },
-  { path: '/messages', label: 'Сообщения', icon: MessageSquare, badge: 3, requiresAuth: true },
-  { path: '/marketplace', label: 'Кинобарахолка', icon: ShoppingBag },
+  { path: '/people', label: 'Люди', icon: Users },
+  { path: '/companies', label: 'Компании', icon: Briefcase },
+  { path: '/marketplace', label: 'Маркет', icon: ShoppingBag },
+  { path: '/industry', label: 'Индустрия', icon: Activity },
 ];
 
 // Routes that require authentication. When a guest navigates to one,
 // the auth modal opens instead of redirecting away.
 export const PRIVATE_ROUTES = new Set<string>([
+  '/partners',
+  '/relationships',
+  '/young-talent',
   '/messages',
   '/notifications',
   '/settings',

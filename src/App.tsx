@@ -16,6 +16,12 @@ const ModelPage = lazy(() => import('./pages/ModelsPage').then(m => ({ default: 
 const StudentsPage = lazy(() => import('./pages/StudentsPage').then(m => ({ default: m.StudentsPage })));
 const StudentProjectsPage = lazy(() => import('./pages/StudentsPage').then(m => ({ default: m.StudentProjectsPage })));
 const StudentSupportPage = lazy(() => import('./pages/StudentsPage').then(m => ({ default: m.StudentSupportPage })));
+const PartnerCenter = lazy(() => import('./pages/PartnerCenter').then(m => ({ default: m.PartnerCenter })));
+const ReferralLanding = lazy(() => import('./pages/ReferralLanding').then(m => ({ default: m.ReferralLanding })));
+const RelationshipsPage = lazy(() => import('./pages/RelationshipsPage').then(m => ({ default: m.RelationshipsPage })));
+const NetworkHub = lazy(() => import('./pages/NetworkHubs').then(m => ({ default: m.NetworkHub })));
+const YoungTalentPage = lazy(() => import('./pages/YoungTalentPage').then(m => ({ default: m.YoungTalentPage })));
+const IndustryListings = lazy(() => import('./pages/IndustryListings').then(m => ({ default: m.IndustryListings })));
 import { ProjectPage } from './pages/ProjectPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { MessagesPage } from './pages/MessagesPage';
@@ -60,6 +66,12 @@ function privateRouteMessage(path: string) {
 function PageRouter() {
   const { path } = useRouter();
   const { user } = useAuth();
+  const referralCode = getRouteParam(path, '/r');
+  if (referralCode) return <ReferralLanding key={path} code={referralCode} />;
+  const eventId = getRouteParam(path, '/events');
+  if (eventId) return <IndustryListings key={path} id={eventId} />;
+  const programId = getRouteParam(path, '/education');
+  if (programId) return <IndustryListings key={path} id={programId} education />;
   const modelId = getRouteParam(path, '/model');
   if (modelId) return <ModelPage key={modelId} id={modelId} />;
   if (path === '/model-settings' && user) return <ModelPage key={user.id} id={user.id} editable />;
@@ -91,6 +103,13 @@ function PageRouter() {
       return <HomePage />;
     case '/pulse':
       return <PulsePage />;
+    case '/partners': return <PartnerCenter />;
+    case '/relationships': return <RelationshipsPage />;
+    case '/people': return <NetworkHub people />;
+    case '/industry': return <NetworkHub />;
+    case '/young-talent': return <YoungTalentPage />;
+    case '/events': return <IndustryListings key="events" />;
+    case '/education': return <IndustryListings key="education" education />;
     case '/models': return <ModelsPage />;
     case '/students': return <StudentsPage />;
     case '/student-projects': return <StudentProjectsPage />;
