@@ -11,7 +11,7 @@ Configurable welcome/monthly free allowances are idempotent by wallet and UTC pe
 ## FOUNDATION ONLY
 
 Catalogue entries and free policy are DISABLED by default. The local tests enable fixtures only.
-No real provider operation executes, no customer charge, no advertised unlimited AI. Credits are internal usage units, not money.
+No real provider operation executes, no customer charge, no advertised unlimited AI. Credits are internal non-transferable usage units, not money, crypto or tradable tokens. PRO and referral/promotion/tender units remain separate product entitlements; none buys verification or organic ranking. See [digital-assets-blockchain-readiness.md](digital-assets-blockchain-readiness.md) for future settlement separation. No credit-to-token conversion exists.
 Referral approved rewards are not automatically fulfilled into these wallets.
 
 ## FUTURE DEPENDENCY
