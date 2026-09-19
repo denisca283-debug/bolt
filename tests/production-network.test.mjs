@@ -95,6 +95,39 @@ test('production network: full replay, casting, guardians, graph, education and 
   await denied("SELECT casting_share_create($1,$2,now()+interval '1 day')",[project,[candidate]]);
   await denied('SELECT minor_contact($1,$2,$3)',[subject,role,minorWork]);
  });
+ await t.test('minor invitations expire and revalidate role, original context, guardian and responsibility before acceptance',async()=>{
+  const scenarios=[
+   ['expired',async(id)=>q("UPDATE minor_casting_invitations SET created_at=now()-interval '31 days',expires_at=now()-interval '1 day' WHERE id=$1",[id])],
+   ['closed role',async(id,r)=>q("UPDATE casting_roles SET status='closed' WHERE id=$1",[r])],
+   ['revoked guardian',async()=>q("UPDATE minor_guardians SET status='revoked' WHERE id=$1",[guardian])],
+   ['changed opportunity',async()=>q("UPDATE work_opportunities SET title='Changed safeguards' WHERE id=$1",[minorWork])],
+   ['removed review',async()=>q('DELETE FROM filmverse_private.minor_opportunity_reviews WHERE work_id=$1',[minorWork])],
+   ['revoked responsible adult',async()=>q('UPDATE minor_project_responsibilities SET revoked_at=now() WHERE project_id=$1',[project])],
+   ['changed role project',async(id,r)=>{const other=await scalar("INSERT INTO projects(user_id,title) VALUES($1,'Different project') RETURNING id",[b]);await q('UPDATE casting_roles SET project_id=$1 WHERE id=$2',[other,r]);}],
+  ];
+  for(const [label,mutate] of scenarios){
+   await as(b);const r=await scalar('INSERT INTO casting_roles(project_id,title) VALUES($1,$2) RETURNING id',[project,'Invitation '+label]);
+   const id=await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);
+   assert.equal(await scalar("SELECT expires_at IS NOT NULL AND expires_at<=created_at+interval '30 days' FROM minor_casting_invitations WHERE id=$1",[id]),true);
+   await db.exec('RESET ROLE; BEGIN');
+   try{await mutate(id,r);await as(a);await denied("SELECT minor_invitation_respond($1,true,'v3',now()+interval '1 week')",[id]);}
+   finally{await db.exec('ROLLBACK; RESET ROLE');}
+   assert.equal(await scalar('SELECT status FROM minor_casting_invitations WHERE id=$1',[id]),'pending',label);
+  }
+  await as(b);const r=await scalar("INSERT INTO casting_roles(project_id,title) VALUES($1,'Current invitation') RETURNING id",[project]);
+  const id=await scalar('SELECT minor_contact($1,$2,$3)',[subject,r,minorWork]);
+  await denied("UPDATE minor_casting_invitations SET expires_at=now()+interval '1 year' WHERE id=$1",[id]);
+  await db.exec('RESET ROLE');await assert.rejects(q("UPDATE minor_casting_invitations SET expires_at=created_at+interval '31 days' WHERE id=$1",[id]),e=>e.code==='23514');
+  await as(a);await denied("SELECT minor_invitation_respond($1,true,'v3',now()+interval '91 days')",[id]);
+  await q("SELECT minor_invitation_respond($1,true,'v3',now()+interval '1 week')",[id]);
+  for(const [,mutate] of scenarios){
+   await as(b);
+   await db.exec('RESET ROLE; BEGIN');
+   try{await mutate(id,r);await as(b);await denied("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[r,subject]);}
+   finally{await db.exec('ROLLBACK; RESET ROLE');}
+  }
+  await as(b);await q("INSERT INTO role_candidates(role_id,casting_subject_id,source) VALUES($1,$2,'invitation')",[r,subject]);
+ });
  await t.test('unrelated responsible adult cannot accept even a reviewed row; browser cannot manufacture review',async()=>{
   await db.exec('RESET ROLE');await q("INSERT INTO minor_project_responsibilities(project_id,adult_user_id,policy_version,reviewed_by,valid_until) VALUES($1,$2,'v1',$3,now()+interval '1 month')",[project,d,b]);
   await as(d);await denied("SELECT minor_responsibility_accept($1,'v1')",[project]);
@@ -145,6 +178,30 @@ test('production network: full replay, casting, guardians, graph, education and 
   await as(c);await q("SELECT relationship_respond($1,'end')",[relation]);
   assert.equal((await scalar('SELECT professional_graph($1,NULL)',[org])).length,0);
   await as(null,'anon');assert.equal(await scalar('SELECT count(*)::int FROM education_program_instructors'),0);
+ });
+ await t.test('relationship episodes preserve ended, declined and expired history; only one current episode can be public',async()=>{
+  for(const terminal of ['ended','declined','expired']){
+   await as(b);const first=await scalar("SELECT relationship_request($1,$2,'technical_partner','Returning collaborator')",[org,c]);
+   assert.equal(await scalar("SELECT relationship_request($1,$2,'technical_partner','Retry')",[org,c]),first);
+   await q("SELECT relationship_respond($1,'confirm',true,false)",[first]);
+   await as(c);await q("SELECT relationship_respond($1,'confirm',true,true)",[first]);
+   await db.exec('RESET ROLE');
+   await assert.rejects(q("INSERT INTO organization_professional_relationships(organization_id,user_id,relationship_type,initiated_by,status,organization_confirmed_at,professional_confirmed_at) VALUES($1,$2,'technical_partner','organization','active',now(),now())",[org,c]),e=>e.code==='23505');
+   if(terminal==='expired')await q("UPDATE organization_professional_relationships SET status='expired',ended_at=now() WHERE id=$1",[first]);
+   else{await as(c);await q('SELECT relationship_respond($1,$2)',[first,terminal==='ended'?'end':'decline']);}
+   const historical=(await q('SELECT * FROM organization_professional_relationships WHERE id=$1',[first]))[0];
+   await as(b);const next=await scalar("SELECT relationship_request($1,$2,'technical_partner','New engagement')",[org,c]);assert.notEqual(next,first);
+   assert.equal(await scalar('SELECT status FROM organization_professional_relationships WHERE id=$1',[next]),'pending');
+   await q("SELECT relationship_respond($1,'confirm',true,false)",[next]);
+   await as(c);await q("SELECT relationship_respond($1,'confirm',true,true)",[next]);
+   await assert.rejects(q("SELECT relationship_respond($1,'end')",[first]),e=>e.code==='23514');
+   await as(null,'anon');assert.deepEqual((await scalar('SELECT professional_graph($1,NULL)',[org])).map(r=>r.id),[next]);
+   await db.exec('RESET ROLE');
+   assert.deepEqual((await q('SELECT * FROM organization_professional_relationships WHERE id=$1',[first]))[0],historical);
+   await assert.rejects(q('DELETE FROM organization_professional_relationships WHERE id=$1',[first]),e=>e.code==='23514');
+   await assert.rejects(q("UPDATE organization_professional_relationships SET ended_at=now() WHERE id=$1",[first]),e=>e.code==='23514');
+   await as(c);await q("SELECT relationship_respond($1,'end')",[next]);
+  }
  });
  await t.test('referral qualification is server-only, no self referral/minor bounty, ledger replay and cancellation safe',async()=>{
   await db.exec('RESET ROLE');

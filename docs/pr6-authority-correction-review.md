@@ -1,6 +1,14 @@
 # PR6 authority correction — local review
 
-PR5 remains frozen at b0e46cf2754b74a23d3e8a8f13c6fe1eda036305. This change only appends migration 20260919040959_production_network_authority_correction.sql; no previously reviewed migration is edited. No live database changes.
+PR5 remains frozen at b0e46cf2754b74a23d3e8a8f13c6fe1eda036305. Final micro-correction amends only the never-applied review migration 20260919040959_production_network_authority_correction.sql, as explicitly authorized. Earlier migrations are unchanged. No live database changes.
+
+## Final micro-correction
+
+Current-only relationship uniqueness replaces all-history uniqueness. Terminal episodes remain immutable; requests can create a new pending episode after end/decline/expiry. Public graph still requires a current active relationship and bilateral publication consent.
+
+Minor invitations have a server-controlled maximum lifetime of 30 days, bound to the original project and opportunity content hash. Acceptance and candidate activation revalidate the open role, matching original context, live guardian authority, reviewed opportunity and responsible adult; consent remains bounded. Expired invitations are preserved and cannot activate candidates.
+
+Do not apply PR6 alone to shared environments. The live database precedes the PR3–PR7 stack; future staging must use the complete pending stack in chronological filename order in one reviewed plan. No migration renames, repair or include-all shortcuts.
 
 ## Corrected boundaries
 
@@ -13,6 +21,6 @@ PR5 remains frozen at b0e46cf2754b74a23d3e8a8f13c6fe1eda036305. This change only
 
 ## Verification and limitations
 
-Final focused replay: 13/13; complete suite: 101 tests passed. Playwright desktop/mobile: 46/46. npm ci, typecheck, lint, test and build passed. Final route mapping adjustment is also checked by focused replay. Lint: zero errors, seven pre-existing warnings. npm audit reports 21 existing advisories (3 low/5 moderate/13 high); no unrelated dependency upgrade.
+Previous correction baseline: 101 tests and 46 desktop/mobile scenarios. The final micro-correction adds two adversarial lifecycle groups (focused replay 15/15); exact full-suite, browser and CI results are reported on the final heads. Lint: zero errors, seven pre-existing warnings. npm audit reports 21 existing advisories (3 low/5 moderate/13 high); no unrelated dependency upgrade.
 
 Final remote HEAD/CI are reported after verification, not inferred from code. These are isolated fixtures/local databases, not hosted acceptance. Guardian inbox UI, delivery/rate limits, evidence review, delegated casting UX and hosted staging remain release blockers. No production release approval.

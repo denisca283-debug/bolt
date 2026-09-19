@@ -8,6 +8,8 @@ Bilateral request/confirm/end RPCs; no client confirmation timestamp edits. Pers
 
 ## FOUNDATION ONLY
 
+Relationship episodes are historical. A partial unique index permits only one pending/active episode per organization/person/type; ended/declined/expired episodes cannot be updated or deleted. A new request reuses the current episode or creates a new pending one, never clears historical dates. Public projections include only the current active episode, with the same bilateral publication controls.
+
 Bid person consent integrates later sourcing; relationship is evidence, never verification or availability guarantee.
 
 ## FUTURE DEPENDENCY

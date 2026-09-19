@@ -137,9 +137,12 @@ $$;
 CREATE TABLE public.minor_casting_invitations (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),casting_subject_id uuid NOT NULL REFERENCES public.casting_subjects(id),
  role_id uuid NOT NULL REFERENCES public.casting_roles(id),work_id uuid NOT NULL REFERENCES public.work_opportunities(id),
+ project_id uuid NOT NULL REFERENCES public.projects(id),work_content_hash text NOT NULL,
  invited_by uuid NOT NULL REFERENCES public.profiles(id),guardian_user_id uuid NOT NULL REFERENCES public.profiles(id),
  status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined')),
  created_at timestamptz NOT NULL DEFAULT now(),responded_at timestamptz,
+ expires_at timestamptz NOT NULL DEFAULT now()+interval '30 days',
+ CHECK(expires_at>created_at AND expires_at<=created_at+interval '30 days'),
  UNIQUE(casting_subject_id,role_id,work_id)
 );
 ALTER TABLE public.minor_casting_invitations ENABLE ROW LEVEL SECURITY;
@@ -148,6 +151,19 @@ GRANT ALL ON public.minor_casting_invitations TO service_role;
 GRANT SELECT ON public.minor_casting_invitations TO authenticated;
 CREATE POLICY minor_invitation_read ON public.minor_casting_invitations FOR SELECT TO authenticated USING(
  guardian_user_id=auth.uid() OR filmverse_private.casting_permission(role_id,'view_casting'));
+-- The original invitation context must still be current, not just independently valid.
+CREATE FUNCTION filmverse_private.minor_invitation_current(i public.minor_casting_invitations) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT i.expires_at>statement_timestamp() AND EXISTS(
+ SELECT 1 FROM public.casting_roles r JOIN public.work_opportunities w ON w.id=i.work_id
+ JOIN public.casting_subjects s ON s.id=i.casting_subject_id
+ JOIN public.minor_guardians g ON g.minor_talent_id=s.minor_talent_id AND g.guardian_user_id=i.guardian_user_id
+ WHERE r.id=i.role_id AND r.status='open' AND r.project_id=i.project_id AND w.project_id=i.project_id
+ AND w.minor_opportunity AND filmverse_private.minor_work_reviewed(w.id)
+ AND i.work_content_hash=encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex')
+ AND g.status='approved' AND g.valid_until>statement_timestamp())
+$$;
+REVOKE ALL ON FUNCTION filmverse_private.minor_invitation_current(public.minor_casting_invitations) FROM PUBLIC,anon,authenticated;
 CREATE FUNCTION filmverse_private.minor_contact(p_subject uuid,p_role uuid,p_work uuid) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE mid uuid; guardian uuid; invitation uuid;
@@ -161,10 +177,13 @@ BEGIN
  SELECT guardian_user_id INTO guardian FROM public.minor_guardians WHERE minor_talent_id=mid AND status='approved'
  AND valid_until>now() AND filmverse_private.person_contactable(guardian_user_id,'invite') ORDER BY is_primary DESC,id LIMIT 1;
  IF guardian IS NULL THEN RAISE EXCEPTION 'contact_unavailable' USING ERRCODE='42501';END IF;
- INSERT INTO public.minor_casting_invitations(casting_subject_id,role_id,work_id,invited_by,guardian_user_id)
- VALUES(p_subject,p_role,p_work,auth.uid(),guardian) ON CONFLICT(casting_subject_id,role_id,work_id) DO NOTHING RETURNING id INTO invitation;
+ INSERT INTO public.minor_casting_invitations(casting_subject_id,role_id,work_id,project_id,work_content_hash,invited_by,guardian_user_id)
+ SELECT p_subject,p_role,p_work,w.project_id,encode(sha256(convert_to((to_jsonb(w)-'updated_at')::text,'UTF8')),'hex'),auth.uid(),guardian
+ FROM public.work_opportunities w WHERE w.id=p_work
+ ON CONFLICT(casting_subject_id,role_id,work_id) DO NOTHING RETURNING id INTO invitation;
  IF invitation IS NULL THEN SELECT id INTO invitation FROM public.minor_casting_invitations
- WHERE casting_subject_id=p_subject AND role_id=p_role AND work_id=p_work AND guardian_user_id=guardian AND status<>'declined';END IF;
+ WHERE casting_subject_id=p_subject AND role_id=p_role AND work_id=p_work AND guardian_user_id=guardian AND status<>'declined'
+ AND filmverse_private.minor_invitation_current(minor_casting_invitations);END IF;
  IF invitation IS NULL THEN RAISE EXCEPTION 'invitation_unavailable' USING ERRCODE='42501';END IF;
  -- Invitation is not a DM or a candidate. Guardian explicitly responds first.
  RETURN invitation;
@@ -178,10 +197,12 @@ DECLARE i public.minor_casting_invitations; project uuid;
 BEGIN
  SELECT * INTO i FROM public.minor_casting_invitations WHERE id=p_id FOR UPDATE;
  IF NOT FOUND OR auth.uid() IS DISTINCT FROM i.guardian_user_id OR NOT filmverse_private.subject_manage(i.casting_subject_id)
- OR i.status<>'pending' OR p_accept IS NULL THEN RAISE EXCEPTION 'guardian_invitation_unavailable' USING ERRCODE='42501';END IF;
- SELECT project_id INTO project FROM public.casting_roles WHERE id=i.role_id;
+ OR i.status<>'pending' OR i.expires_at<=clock_timestamp() OR p_accept IS NULL THEN RAISE EXCEPTION 'guardian_invitation_unavailable' USING ERRCODE='42501';END IF;
+ SELECT project_id INTO project FROM public.casting_roles WHERE id=i.role_id FOR SHARE;
+ PERFORM 1 FROM public.work_opportunities WHERE id=i.work_id FOR SHARE;
  IF p_accept THEN
- IF NOT filmverse_private.minor_work_reviewed(i.work_id) OR p_until IS NULL OR p_until<=now() OR p_until>now()+interval '90 days' THEN
+ IF NOT filmverse_private.minor_invitation_current(i) OR i.expires_at<=clock_timestamp()
+ OR p_until IS NULL OR p_until<=clock_timestamp() OR p_until>now()+interval '90 days' THEN
  RAISE EXCEPTION 'reviewed_context_and_bounded_consent_required' USING ERRCODE='42501';END IF;
  INSERT INTO public.minor_project_consents(casting_subject_id,project_id,guardian_user_id,scope,terms_version,expires_at)
  VALUES(i.casting_subject_id,project,auth.uid(),'application',p_terms,p_until);
@@ -193,12 +214,15 @@ CREATE FUNCTION public.minor_invitation_respond(p_id uuid,p_accept boolean,p_ter
 $$;
 CREATE FUNCTION filmverse_private.minor_candidate_source_guard() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 BEGIN
- IF NEW.source<>'application' AND EXISTS(SELECT 1 FROM public.casting_subjects WHERE id=NEW.casting_subject_id AND subject_type='minor')
+ IF (TG_OP='INSERT' OR NEW.status<>'rejected') AND NEW.source<>'application' AND EXISTS(SELECT 1 FROM public.casting_subjects WHERE id=NEW.casting_subject_id AND subject_type='minor')
  AND NOT EXISTS(SELECT 1 FROM public.minor_casting_invitations i WHERE i.casting_subject_id=NEW.casting_subject_id AND i.role_id=NEW.role_id
- AND i.status='accepted' AND filmverse_private.minor_work_reviewed(i.work_id)) THEN
+ AND i.status='accepted' AND filmverse_private.minor_invitation_current(i)
+ AND EXISTS(SELECT 1 FROM public.minor_project_consents c WHERE c.casting_subject_id=i.casting_subject_id
+ AND c.project_id=i.project_id AND c.guardian_user_id=i.guardian_user_id AND c.scope='application'
+ AND c.revoked_at IS NULL AND c.expires_at>statement_timestamp())) THEN
  RAISE EXCEPTION 'accepted_guardian_invitation_required' USING ERRCODE='42501';END IF;RETURN NEW;
 END $$;
-CREATE TRIGGER minor_candidate_source BEFORE INSERT ON public.role_candidates FOR EACH ROW EXECUTE FUNCTION filmverse_private.minor_candidate_source_guard();
+CREATE TRIGGER minor_candidate_source BEFORE INSERT OR UPDATE OF role_id,casting_subject_id,source,status ON public.role_candidates FOR EACH ROW EXECUTE FUNCTION filmverse_private.minor_candidate_source_guard();
 DO $$ DECLARE f record;BEGIN
  FOR f IN SELECT p.oid::regprocedure sig,p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
  WHERE n.nspname IN ('public','filmverse_private') AND p.proname IN ('responsible_adult_associated','responsible_adult_ready','responsibility_accept','minor_responsibility_accept','minor_responsibility_guard','minor_candidate_source_guard','minor_invitation_respond') LOOP
@@ -234,6 +258,23 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  AND filmverse_private.person_work_context(p_person)))
 $$;
 REVOKE ALL ON FUNCTION filmverse_private.graph_contact_allowed(uuid) FROM PUBLIC,anon,authenticated;
+-- Historical episodes never prevent a later collaboration with the same counterpart.
+DO $$ DECLARE c record;BEGIN
+ FOR c IN SELECT conname FROM pg_constraint WHERE conrelid='public.organization_professional_relationships'::regclass
+ AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (organization_id, user_id, relationship_type)' LOOP
+ EXECUTE format('ALTER TABLE public.organization_professional_relationships DROP CONSTRAINT %I',c.conname);
+ END LOOP;
+END $$;
+CREATE UNIQUE INDEX graph_current_relationship ON public.organization_professional_relationships(organization_id,user_id,relationship_type)
+ WHERE status IN ('pending','active');
+CREATE FUNCTION filmverse_private.relationship_history_guard() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+ IF OLD.status IN ('ended','declined','expired') THEN RAISE EXCEPTION 'relationship_history_immutable' USING ERRCODE='23514';END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION filmverse_private.relationship_history_guard() FROM PUBLIC,anon,authenticated;
+CREATE TRIGGER relationship_history_immutable BEFORE UPDATE OR DELETE ON public.organization_professional_relationships
+ FOR EACH ROW EXECUTE FUNCTION filmverse_private.relationship_history_guard();
 CREATE OR REPLACE FUNCTION filmverse_private.relationship_request(p_org uuid,p_person uuid,p_kind text,p_role text) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE result uuid; orgside boolean;
 BEGIN
@@ -241,12 +282,15 @@ BEGIN
  orgside:=filmverse_private.org_can(p_org,'manage_members');
  IF (auth.uid()<>p_person AND NOT orgside) OR NOT EXISTS(SELECT 1 FROM public.organizations WHERE id=p_org) OR (NOT orgside AND NOT filmverse_private.org_public(p_org) AND NOT filmverse_private.org_member(p_org)) THEN RAISE EXCEPTION 'relationship_unavailable' USING ERRCODE='42501';END IF;
  IF auth.uid()<>p_person AND NOT filmverse_private.graph_contact_allowed(p_person) THEN RAISE EXCEPTION 'relationship_unavailable' USING ERRCODE='42501';END IF;
+ LOOP
  INSERT INTO public.organization_professional_relationships(organization_id,user_id,relationship_type,custom_role,initiated_by,organization_confirmed_at,professional_confirmed_at)
  VALUES(p_org,p_person,p_kind,p_role,CASE WHEN auth.uid()=p_person THEN 'professional' ELSE 'organization' END,
  CASE WHEN auth.uid()<>p_person AND orgside THEN now() END,CASE WHEN auth.uid()=p_person THEN now() END)
- ON CONFLICT(organization_id,user_id,relationship_type) DO NOTHING RETURNING id INTO result;
- IF result IS NULL THEN SELECT id INTO result FROM public.organization_professional_relationships WHERE organization_id=p_org AND user_id=p_person AND relationship_type=p_kind;END IF;
- RETURN result;
+ ON CONFLICT(organization_id,user_id,relationship_type) WHERE status IN ('pending','active') DO NOTHING RETURNING id INTO result;
+ IF result IS NULL THEN SELECT id INTO result FROM public.organization_professional_relationships
+ WHERE organization_id=p_org AND user_id=p_person AND relationship_type=p_kind AND status IN ('pending','active') FOR SHARE;END IF;
+ IF result IS NOT NULL THEN RETURN result;END IF;
+ END LOOP;
 END $$;
 CREATE OR REPLACE FUNCTION filmverse_private.relationship_respond(p_id uuid,p_action text,p_public_org boolean DEFAULT false,p_public_person boolean DEFAULT false) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE r public.organization_professional_relationships; personside boolean;
@@ -254,8 +298,8 @@ BEGIN
  SELECT * INTO r FROM public.organization_professional_relationships WHERE id=p_id FOR UPDATE;
  IF NOT FOUND OR auth.uid() IS NULL OR (r.user_id<>auth.uid() AND NOT filmverse_private.org_can(r.organization_id,'manage_members')) THEN RAISE EXCEPTION 'relationship_unavailable' USING ERRCODE='42501';END IF;
  personside:=r.user_id=auth.uid();
- IF p_action='confirm' THEN
  IF r.status NOT IN ('pending','active') THEN RAISE EXCEPTION 'relationship_closed' USING ERRCODE='23514';END IF;
+ IF p_action='confirm' THEN
  IF NOT personside AND NOT filmverse_private.graph_contact_allowed(r.user_id) THEN RAISE EXCEPTION 'relationship_unavailable' USING ERRCODE='42501';END IF;
  IF personside THEN r.professional_confirmed_at:=now();r.public_on_organization_profile:=coalesce(p_public_org,false);r.public_on_professional_profile:=coalesce(p_public_person,false);
  ELSE r.organization_confirmed_at:=now();r.organization_displays_relationship:=coalesce(p_public_org,false);END IF;

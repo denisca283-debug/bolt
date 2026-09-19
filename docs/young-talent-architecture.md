@@ -8,6 +8,8 @@ Separate adult auth identity and casting subject. Minor has no account. Approved
 
 ## FOUNDATION ONLY
 
+Invitations expire at a server-assigned deadline no later than 30 days after creation. Acceptance and search/invitation candidate activation recheck the original project and opportunity content hash, open role, live reviewed opportunity/responsible adult and current guardian authority. Accepted invitations must remain unexpired; candidate activation also needs live project consent. Expired rows remain history, not deletions or renewed authority.
+
 Jurisdiction-aware factual compliance, secondary guardian rows, private legal facts and sanitized-media metadata. No legal-compliance badge.
 
 ## FUTURE DEPENDENCY
